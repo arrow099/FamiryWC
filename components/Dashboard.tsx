@@ -37,6 +37,7 @@ import QueryStatsIcon from "@mui/icons-material/QueryStats";
 import SportsSoccerIcon from "@mui/icons-material/SportsSoccer";
 import { useEspnLiveMatches } from "@/hooks/useEspnLiveMatches";
 import { buildTournamentResults, emptyActualBracket, emptyGroups } from "@/lib/app-data/deriveTournamentResults";
+import { selectMobileHeaderMatch } from "@/lib/app-data/headerMatches";
 import { flagForTeam, formatTeamLabel } from "@/lib/app-data/teamDisplay";
 import type { AppState, GroupId, KnockoutPick, Match, Pick, RoundId, StaticAppData, Team } from "@/lib/schemas/appData";
 import { GROUP_IDS, ROUND_IDS } from "@/lib/schemas/appData";
@@ -99,16 +100,6 @@ function finalistIds(pick: Pick): string[] {
 
 function roundTeamIds(pick: Pick, round: "QF" | "SF"): string[] {
   return pick.knockout[round].flatMap((match) => [match.team1Id, match.team2Id]);
-}
-
-function groupByTeamId(pick: Pick): Map<string, GroupId> {
-  const groups = new Map<string, GroupId>();
-  for (const group of GROUP_IDS) {
-    for (const groupPick of pick.groups[group]) {
-      groups.set(groupPick.teamId, group);
-    }
-  }
-  return groups;
 }
 
 function TeamLabel({ teamMap, teamId }: { teamMap: Map<string, Team>; teamId: string | null | undefined }) {
@@ -235,6 +226,7 @@ function TodayMatches({ state, teamMap }: { state: AppState; teamMap: Map<string
   const todaysMatches = state.matches
     .filter((match) => match.kickoffAt && easternDateKey(match.kickoffAt) === todayKey)
     .sort((a, b) => (a.kickoffAt ?? "").localeCompare(b.kickoffAt ?? ""));
+  const mobileMatch = selectMobileHeaderMatch(todaysMatches);
 
   if (todaysMatches.length === 0) {
     return (
@@ -255,6 +247,7 @@ function TodayMatches({ state, teamMap }: { state: AppState; teamMap: Map<string
         display: "flex",
         flex: "1 1 auto",
         gap: 0.75,
+        justifyContent: { xs: "center", sm: "flex-start" },
         minWidth: 0,
         maxWidth: "100%",
         overflowX: "auto",
@@ -268,16 +261,18 @@ function TodayMatches({ state, teamMap }: { state: AppState; teamMap: Map<string
         return (
           <Paper
             key={match.id}
+            data-testid="header-match-card"
             variant="outlined"
             sx={{
               alignItems: "center",
               bgcolor: isLive ? "success.light" : "background.paper",
               borderColor: isLive ? "success.main" : "divider",
               color: isLive ? "success.contrastText" : "text.primary",
-              display: "flex",
+              display: { xs: match.id === mobileMatch?.id ? "flex" : "none", sm: "flex" },
               flex: "0 0 auto",
               gap: 0.4,
               minHeight: 24,
+              minWidth: 250,
               px: 0.75,
               py: 0.25,
             }}
@@ -289,6 +284,7 @@ function TodayMatches({ state, teamMap }: { state: AppState; teamMap: Map<string
             </Typography>
             <CompactMatchTeamLabel teamMap={teamMap} teamId={match.awayTeamId} fallbackName={match.awayTeamName} />
             <Chip
+              data-testid="header-match-status"
               size="small"
               color={statusChip.color}
               label={statusChip.label}
@@ -297,6 +293,8 @@ function TodayMatches({ state, teamMap }: { state: AppState; teamMap: Map<string
                 fontSize: "0.62rem",
                 fontWeight: 900,
                 height: 17,
+                ml: "auto",
+                minWidth: 72,
                 "@keyframes liveBadgePulse": {
                   "0%, 100%": { opacity: 1 },
                   "50%": { opacity: 0.42 },
@@ -417,6 +415,14 @@ function GroupConsensusList({ rows }: { rows: Array<{ group: GroupId; label: Rea
   );
 }
 
+function MobileScrollHint({ children }: { children: ReactNode }) {
+  return (
+    <Typography variant="caption" color="text.secondary" sx={{ display: { xs: "block", sm: "none" }, fontWeight: 700 }}>
+      {children}
+    </Typography>
+  );
+}
+
 function Overview({ state, teamMap }: { state: AppState; teamMap: Map<string, Team> }) {
   const championCounts = countBy(state.picks, (pick) => pick.championPick);
   const topGroupPicks = GROUP_IDS.map((group) => {
@@ -427,13 +433,10 @@ function Overview({ state, teamMap }: { state: AppState; teamMap: Map<string, Te
       count: top?.[1] ?? 0,
     };
   });
-  const topThirdPlaceGroups = countBy(
-    state.picks.flatMap((pick) => {
-      const teamGroups = groupByTeamId(pick);
-      return pick.thirdPlaceAdvancers.map((teamId) => teamGroups.get(teamId));
-    }),
-    (group) => group,
-  ).map(([group, count]) => ({ group: group as GroupId, label: `Group ${group}`, count }));
+  const topThirdPlacePicks = countBy(
+    state.picks.flatMap((pick) => pick.thirdPlaceAdvancers),
+    (teamId) => teamId,
+  );
 
   return (
     <Stack spacing={{ xs: 2, md: 2.5 }}>
@@ -489,9 +492,9 @@ function Overview({ state, teamMap }: { state: AppState; teamMap: Map<string, Te
           <Card sx={{ width: "100%" }}>
             <CardContent>
               <Typography variant="h3" sx={{ mb: 2 }}>
-                Top Third-Place Groups
+                Top Third-Place Picks
               </Typography>
-              <GroupConsensusList rows={topThirdPlaceGroups} />
+              <Bars rows={topThirdPlacePicks} teamMap={teamMap} />
             </CardContent>
           </Card>
         </Box>
@@ -503,13 +506,20 @@ function Overview({ state, teamMap }: { state: AppState; teamMap: Map<string, Te
 function Participants({ state, teamMap, onViewBracket }: { state: AppState; teamMap: Map<string, Team>; onViewBracket: (memberId: string) => void }) {
   const picksByMember = new Map(state.picks.map((pick) => [pick.memberId, pick]));
   return (
-    <TableContainer component={Paper} variant="outlined" sx={{ overflowX: "auto" }}>
-      <Table size="small" sx={{ minWidth: 560 }}>
+    <TableContainer component={Paper} variant="outlined">
+      <Table
+        size="small"
+        sx={{
+          tableLayout: "fixed",
+          width: "100%",
+          "& .MuiTableCell-root": { px: { xs: 0.75, sm: 2 } },
+        }}
+      >
         <TableHead>
           <TableRow>
-            <TableCell>Member</TableCell>
-            <TableCell>Champion</TableCell>
-            <TableCell>Bracket</TableCell>
+            <TableCell sx={{ width: { xs: "52%", sm: "auto" } }}>Member</TableCell>
+            <TableCell align="center" sx={{ width: { xs: "27%", sm: "auto" } }}>Champion</TableCell>
+            <TableCell align="center" sx={{ width: { xs: "21%", sm: "auto" } }}>Bracket</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -517,11 +527,13 @@ function Participants({ state, teamMap, onViewBracket }: { state: AppState; team
             const pick = picksByMember.get(member.id);
             return (
               <TableRow key={member.id}>
-                <TableCell>{member.displayName}</TableCell>
-                <TableCell>
-                  <TeamLabel teamMap={teamMap} teamId={pick?.championPick} />
+                <TableCell sx={{ overflowWrap: "anywhere" }}>{member.displayName}</TableCell>
+                <TableCell align="center">
+                  <Box sx={{ display: "flex", justifyContent: "center" }}>
+                    <TeamLabel teamMap={teamMap} teamId={pick?.championPick} />
+                  </Box>
                 </TableCell>
-                <TableCell>
+                <TableCell align="center">
                   <Chip label="View" size="small" clickable onClick={() => onViewBracket(member.id)} />
                 </TableCell>
               </TableRow>
@@ -732,23 +744,15 @@ function ScheduleTable({ title, matches, teamMap }: { title: string; matches: Ma
           {title}
         </Typography>
         <TableContainer component={Paper} variant="outlined" sx={{ overflowX: "auto" }}>
-          <Table size="small" sx={{ minWidth: 1060, tableLayout: "fixed" }}>
-            <colgroup>
-              <col style={{ width: 150 }} />
-              <col style={{ width: 120 }} />
-              <col style={{ width: 230 }} />
-              <col style={{ width: 110 }} />
-              <col style={{ width: 120 }} />
-              <col style={{ width: 340 }} />
-            </colgroup>
+          <Table size="small" sx={{ minWidth: { xs: 0, sm: 1060 }, tableLayout: "fixed" }}>
             <TableHead>
               <TableRow>
-                <TableCell>Kickoff</TableCell>
-                <TableCell align="center">Group</TableCell>
-                <TableCell align="center">Match</TableCell>
-                <TableCell align="center">Status</TableCell>
-                <TableCell align="center">Score</TableCell>
-                <TableCell>Venue</TableCell>
+                <TableCell sx={{ width: { xs: "32%", sm: 150 } }}>Kickoff</TableCell>
+                <TableCell align="center" sx={{ display: { xs: "none", sm: "table-cell" }, width: 120 }}>Group</TableCell>
+                <TableCell align="center" sx={{ width: { xs: "48%", sm: 230 } }}>Match</TableCell>
+                <TableCell align="center" sx={{ display: { xs: "none", sm: "table-cell" }, width: 110 }}>Status</TableCell>
+                <TableCell align="center" sx={{ width: { xs: "20%", sm: 120 } }}>Score</TableCell>
+                <TableCell sx={{ display: { xs: "none", sm: "table-cell" }, width: 340 }}>Venue</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -757,7 +761,7 @@ function ScheduleTable({ title, matches, teamMap }: { title: string; matches: Ma
                 return (
                   <TableRow key={match.id}>
                     <TableCell>{formatScheduleKickoff(match.kickoffAt)}</TableCell>
-                    <TableCell align="center">{match.group ? `Group ${match.group}` : match.round}</TableCell>
+                    <TableCell align="center" sx={{ display: { xs: "none", sm: "table-cell" } }}>{match.group ? `Group ${match.group}` : match.round}</TableCell>
                     <TableCell align="center">
                       <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" flexWrap="wrap">
                         <MatchTeamLabel teamMap={teamMap} teamId={match.homeTeamId} fallbackName={match.homeTeamName} />
@@ -767,11 +771,11 @@ function ScheduleTable({ title, matches, teamMap }: { title: string; matches: Ma
                         <MatchTeamLabel teamMap={teamMap} teamId={match.awayTeamId} fallbackName={match.awayTeamName} />
                     </Stack>
                   </TableCell>
-                    <TableCell align="center">
+                    <TableCell align="center" sx={{ display: { xs: "none", sm: "table-cell" } }}>
                       <Chip size="small" color={statusChip.color} label={statusChip.label} sx={statusChip.label === "FT" ? undefined : { minWidth: 104 }} />
                     </TableCell>
                     <TableCell align="center">{match.status === "pre" ? "-" : scoreText(match)}</TableCell>
-                    <TableCell>{[match.venue.name, match.venue.city].filter(Boolean).join(", ") || "-"}</TableCell>
+                    <TableCell sx={{ display: { xs: "none", sm: "table-cell" } }}>{[match.venue.name, match.venue.city].filter(Boolean).join(", ") || "-"}</TableCell>
                   </TableRow>
                 );
               })}
@@ -808,9 +812,7 @@ function KnockoutView({ pick, teamMap }: { pick: Pick; teamMap: Map<string, Team
         sx={{ bgcolor: "grey.50", borderBottom: "1px solid", borderColor: "divider", px: { xs: 2, sm: 2.5 }, py: 1.5 }}
       >
         <Typography variant="h3">Tournament bracket</Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-          Scroll horizontally to inspect the full bracket
-        </Typography>
+        <MobileScrollHint>Scroll horizontally to inspect the full bracket</MobileScrollHint>
       </Stack>
       <Box sx={{ overflowX: "auto", px: { xs: 1.5, sm: 2.5 }, pb: 2.5, pt: 4.5, scrollbarWidth: "thin" }}>
         <Box
@@ -989,10 +991,11 @@ function Compare({ state, teamMap }: { state: AppState; teamMap: Map<string, Tea
         }}
       >
         <PickSelector members={state.members} selectedMemberId={memberA} onChange={setMemberA} />
-        <CompareArrowsIcon color="action" sx={{ alignSelf: "center", transform: { xs: "rotate(90deg)", sm: "none" } }} />
+        <CompareArrowsIcon color="action" sx={{ alignSelf: "center", display: { xs: "none", sm: "block" } }} />
         <PickSelector members={state.members} selectedMemberId={memberB} onChange={setMemberB} />
         <Chip label={`${matches} of ${rows.length} picks match`} color="primary" sx={{ ml: { sm: "auto" } }} />
       </Paper>
+      <MobileScrollHint>Scroll horizontally to inspect the full comparison</MobileScrollHint>
       <TableContainer component={Paper} variant="outlined" sx={{ overflowX: "auto" }}>
         <Table size="small" sx={{ minWidth: 720 }}>
           <TableHead>
@@ -1023,38 +1026,41 @@ function Compare({ state, teamMap }: { state: AppState; teamMap: Map<string, Tea
 
 function Leaderboard({ state, teamMap }: { state: AppState; teamMap: Map<string, Team> }) {
   return (
-    <TableContainer component={Paper} variant="outlined" sx={{ overflowX: "auto" }}>
-      <Table size="small" sx={{ minWidth: 900 }}>
-        <TableHead>
-          <TableRow>
-            <TableCell>Rank</TableCell>
-            <TableCell>Member</TableCell>
-            <TableCell>Total</TableCell>
-            <TableCell>Groups</TableCell>
-            <TableCell>Third</TableCell>
-            <TableCell>Knockout</TableCell>
-            <TableCell>Champion Bonus</TableCell>
-            <TableCell>Champion Pick</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {state.leaderboard.map((entry) => (
-            <TableRow key={entry.memberId}>
-              <TableCell sx={{ fontWeight: 900 }}>{entry.rank}</TableCell>
-              <TableCell>{entry.displayName}</TableCell>
-              <TableCell sx={{ color: "primary.main", fontWeight: 900 }}>{entry.totalPoints}</TableCell>
-              <TableCell>{entry.groupPoints}</TableCell>
-              <TableCell>{entry.thirdPlacePoints}</TableCell>
-              <TableCell>{entry.knockoutPoints}</TableCell>
-              <TableCell>{entry.championBonus}</TableCell>
-              <TableCell>
-                <TeamLabel teamMap={teamMap} teamId={entry.championPick} />
-              </TableCell>
+    <Stack spacing={1}>
+      <MobileScrollHint>Scroll horizontally to inspect the full leaderboard</MobileScrollHint>
+      <TableContainer component={Paper} variant="outlined" sx={{ overflowX: "auto" }}>
+        <Table size="small" sx={{ minWidth: 900 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Rank</TableCell>
+              <TableCell>Member</TableCell>
+              <TableCell>Total</TableCell>
+              <TableCell>Groups</TableCell>
+              <TableCell>Third</TableCell>
+              <TableCell>Knockout</TableCell>
+              <TableCell>Champion Bonus</TableCell>
+              <TableCell>Champion Pick</TableCell>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+          </TableHead>
+          <TableBody>
+            {state.leaderboard.map((entry) => (
+              <TableRow key={entry.memberId}>
+                <TableCell sx={{ fontWeight: 900 }}>{entry.rank}</TableCell>
+                <TableCell>{entry.displayName}</TableCell>
+                <TableCell sx={{ color: "primary.main", fontWeight: 900 }}>{entry.totalPoints}</TableCell>
+                <TableCell>{entry.groupPoints}</TableCell>
+                <TableCell>{entry.thirdPlacePoints}</TableCell>
+                <TableCell>{entry.knockoutPoints}</TableCell>
+                <TableCell>{entry.championBonus}</TableCell>
+                <TableCell>
+                  <TeamLabel teamMap={teamMap} teamId={entry.championPick} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Stack>
   );
 }
 
@@ -1102,7 +1108,7 @@ export function Dashboard({ initialData }: { initialData: StaticAppData }) {
               py: { xs: 1.5, md: 1 },
             }}
           >
-            <Box sx={{ gridColumn: { md: 1 }, gridRow: { md: 1 }, minWidth: 0 }}>
+            <Box sx={{ gridColumn: { xs: "1 / -1", sm: 1, md: 1 }, gridRow: { md: 1 }, minWidth: 0, textAlign: { xs: "center", sm: "left" } }}>
               <Typography component="h1" variant="h1">
                 Famiry 2026
               </Typography>
@@ -1110,13 +1116,13 @@ export function Dashboard({ initialData }: { initialData: StaticAppData }) {
                 World Cup bracket challenge
               </Typography>
             </Box>
-            <Box sx={{ gridColumn: { xs: "1 / -1", md: 2 }, gridRow: { xs: 2, md: 1 }, minWidth: 0 }}>
+            <Box sx={{ gridColumn: { xs: "1 / -1", md: 2 }, gridRow: { xs: 2, md: 1 }, minWidth: 0, textAlign: { xs: "center", sm: "left" } }}>
               <TodayMatches state={state} teamMap={teamMap} />
             </Box>
             <Chip
               label={`Updated ${formatUpdatedLabel(state.capturedAt)}`}
               color={state.sources.matches.stale ? "warning" : "success"}
-              sx={{ gridColumn: { md: 3 }, gridRow: { md: 1 }, justifySelf: "end", whiteSpace: "nowrap" }}
+              sx={{ display: { xs: "none", sm: "inline-flex" }, gridColumn: { md: 3 }, gridRow: { md: 1 }, justifySelf: "end", whiteSpace: "nowrap" }}
             />
           </Toolbar>
         </Container>
@@ -1147,9 +1153,6 @@ export function Dashboard({ initialData }: { initialData: StaticAppData }) {
           sx={{ mb: { xs: 2, md: 3 } }}
         >
           <Box>
-            <Typography variant="overline" color="primary.main" sx={{ fontWeight: 900, letterSpacing: "0.12em", lineHeight: 1.4 }}>
-              Bracket dashboard
-            </Typography>
             <Typography component="h2" variant="h2">
               {TAB_LABELS[tab]}
             </Typography>
