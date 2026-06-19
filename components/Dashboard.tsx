@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   Alert,
   AppBar,
@@ -35,8 +35,10 @@ import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 import GroupsIcon from "@mui/icons-material/Groups";
 import QueryStatsIcon from "@mui/icons-material/QueryStats";
 import SportsSoccerIcon from "@mui/icons-material/SportsSoccer";
+import { useEspnLiveMatches } from "@/hooks/useEspnLiveMatches";
+import { buildTournamentResults, emptyActualBracket, emptyGroups } from "@/lib/app-data/deriveTournamentResults";
 import { flagForTeam, formatTeamLabel } from "@/lib/app-data/teamDisplay";
-import type { AppState, GroupId, KnockoutPick, Match, Pick, RoundId, Team } from "@/lib/schemas/appData";
+import type { AppState, GroupId, KnockoutPick, Match, Pick, RoundId, StaticAppData, Team } from "@/lib/schemas/appData";
 import { GROUP_IDS, ROUND_IDS } from "@/lib/schemas/appData";
 
 type MatchStatusChipColor = "default" | "error" | "success" | "warning";
@@ -1056,48 +1058,35 @@ function Leaderboard({ state, teamMap }: { state: AppState; teamMap: Map<string,
   );
 }
 
-export function Dashboard() {
-  const [state, setState] = useState<AppState | null>(null);
+export function Dashboard({ initialData }: { initialData: StaticAppData }) {
   const [tab, setTab] = useState(0);
-  const [selectedMemberId, setSelectedMemberId] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    async function load() {
-      try {
-        const response = await fetch("/api/data", { cache: "no-store" });
-        if (!response.ok) throw new Error(`Data request failed with ${response.status}`);
-        const nextState = (await response.json()) as AppState;
-        if (!active) return;
-        setState(nextState);
-        setSelectedMemberId((current) => current || nextState.members[0]?.id || "");
-        setError(null);
-      } catch (nextError) {
-        if (!active) return;
-        setError(nextError instanceof Error ? nextError.message : "Unable to load app data.");
-      }
-    }
-
-    load();
-    const interval = window.setInterval(load, 30000);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, []);
-
-  const teamMap = useMemo(() => new Map(state?.teams.map((team) => [team.id, team]) ?? []), [state]);
-  const selectedPick = state?.picks.find((pick) => pick.memberId === selectedMemberId) ?? state?.picks[0];
-
-  if (!state) {
-    return (
-      <Container maxWidth="xl" sx={{ py: 4 }}>
-        <LinearProgress />
-        {error ? <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert> : null}
-      </Container>
-    );
-  }
+  const [selectedMemberId, setSelectedMemberId] = useState(initialData.members[0]?.id ?? "");
+  const canonicalTeamIds = useMemo(() => new Set(initialData.teams.map((team) => team.id)), [initialData.teams]);
+  const live = useEspnLiveMatches(canonicalTeamIds);
+  const tournamentResults = useMemo(
+    () => (tab === 6 ? buildTournamentResults(initialData, live.matches) : null),
+    [initialData, live.matches, tab],
+  );
+  const state = useMemo<AppState>(() => ({
+    ...initialData,
+    capturedAt: live.capturedAt ?? new Date(0).toISOString(),
+    sources: {
+      ...initialData.sources,
+      matches: {
+        provider: "espn",
+        capturedAt: live.capturedAt,
+        lastSuccessfulFetchAt: live.lastSuccessfulFetchAt,
+        stale: live.stale,
+        message: live.message,
+      },
+    },
+    matches: live.matches,
+    groups: tournamentResults?.groups ?? emptyGroups(),
+    actualBracket: tournamentResults?.actualBracket ?? emptyActualBracket(),
+    leaderboard: tournamentResults?.leaderboard ?? [],
+  }), [initialData, live, tournamentResults]);
+  const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams]);
+  const selectedPick = state.picks.find((pick) => pick.memberId === selectedMemberId) ?? state.picks[0];
 
   return (
     <Box>
@@ -1143,10 +1132,10 @@ export function Dashboard() {
       </AppBar>
 
       <Container maxWidth="xl" component="main" sx={{ py: { xs: 2.5, md: 4 } }}>
-        {error ? <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert> : null}
+        {live.loading ? <LinearProgress sx={{ mb: 2 }} /> : null}
         {state.sources.matches.stale ? (
           <Alert severity="warning" sx={{ mb: 2 }}>
-            Live match data is stale or unavailable. Picks and scoring are still available.
+            {state.sources.matches.message ?? "Live match data is stale or unavailable. Picks remain available."}
           </Alert>
         ) : null}
 

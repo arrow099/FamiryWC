@@ -28,7 +28,7 @@ The first version must include both the existing family bracket picks and live m
 - No database in v1.
 - No user-submitted pick editing in v1.
 - No dependency on FIFA Bracket Challenge for v1 picks.
-- No direct browser calls to ESPN, FIFA, or other third-party data providers.
+- No database, scheduled refresh job, or persistent live-data store.
 - No user-facing admin editor in v1.
 
 ## Users
@@ -169,7 +169,7 @@ Required immediately:
 - family picks from `data/family_bracket_picks.json`
 - teams extracted from the same file
 - member display names extracted from the same file
-- normalized schedule and match status from a server-side match provider adapter
+- normalized schedule and match status from a browser-compatible ESPN provider adapter
 - actual match results as available from the match provider
 - actual group standings derived from available results
 - actual knockout bracket outcomes as available from match results
@@ -198,13 +198,13 @@ Stable data:
 - scoring rules
 - bracket pick structure
 
-The UI should poll one app-state endpoint for simplicity, but the provider layer should only refresh live/provider-derived fields. Browser polling must read cached normalized app state, not call ESPN/FIFA directly per browser request and not trigger provider refresh.
+The UI should poll ESPN every 30 seconds while visible. The provider layer normalizes raw payloads into `Match[]`; tab-level selectors derive only the data needed by the active view. Failed refreshes retain the last successful in-memory snapshot for the current session.
 
 ## Functional Requirements
 
 - Load and render the extracted family picks.
 - Normalize teams and member identities from the extracted data.
-- Fetch and normalize live match data through a server-side provider adapter.
+- Fetch and normalize live match data directly in each visible browser.
 - Provide a stable generated app-state contract.
 - Render all bracket-pick views without a database.
 - Render schedule, live scores, match status, and freshness.

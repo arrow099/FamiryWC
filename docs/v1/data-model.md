@@ -22,10 +22,11 @@ Planned source file:
 data/scoring_rules.json
 ```
 
-Generated frontend file:
+Runtime frontend inputs:
 
 ```text
-public/data.json
+server-rendered StaticAppData
+browser-resident Match[]
 ```
 
 ## Source Pick Data

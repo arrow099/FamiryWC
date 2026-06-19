@@ -26,13 +26,13 @@ The app starts from the bracket picks already extracted into:
 data/family_bracket_picks.json
 ```
 
-v1 includes live match data behind a server-side provider adapter. The browser should render our generated/cached app state, not raw ESPN/FIFA/provider responses.
+v1 includes live match data through a browser-compatible ESPN provider adapter. React renders normalized app contracts, not raw ESPN responses.
 
 Recommended live path:
 
 ```text
-Vercel Cron -> /api/cron/refresh -> provider fetch -> cached app state
-browser -> /api/data -> cached app state
+server-rendered stable picks -> dashboard
+visible browser -> ESPN -> normalized in-memory matches -> active tab
 ```
 
-Browser UI reads cached state only. Provider refresh is scheduled through Vercel Cron or authenticated server-to-server calls.
+Each visible browser fetches immediately, polls every 30 seconds, and pauses polling while hidden. Standings and leaderboard scoring are derived only while the Leaderboard tab is active.

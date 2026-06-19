@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("https://site.api.espn.com/**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ events: [] }),
+    });
+  });
+});
+
 test("renders dashboard and core tabs", async ({ page }) => {
   await page.goto("/");
 

@@ -4,14 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npm run build:data && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:smoke": "playwright test",
-    "build:data": "tsx scripts/build-data.ts",
-    "refresh:local": "tsx scripts/run-local-refresh.ts"
+    "test:smoke": "playwright test"
   },
   "dependencies": {
     "@emotion/cache": "^11.14.0",
@@ -19,7 +17,6 @@
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^6.5.0",
     "@mui/material": "^6.5.0",
-    "@vercel/blob": "^2.4.1",
     "next": "^15.3.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

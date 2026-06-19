@@ -1,264 +1,83 @@
 # Architecture: Famiry World Cup v1
 
-Date: 2026-06-18
+Date: 2026-06-19
 
 ## Decision
 
-Use Next.js with TypeScript and Material UI for v1, backed by local JSON files and a generated app-state contract.
+Use Next.js, TypeScript, React, and Material UI with a client-side live-data pipeline. Stable family picks are validated and normalized while rendering the page. Each visible browser polls ESPN directly every 30 seconds and keeps normalized matches in memory.
 
-Do not use a database in v1.
-
-Primary flow:
+There is no v1 database, server API, scheduled job, Vercel Blob store, or persistent live-data cache.
 
 ```text
-local picks + match provider data
-        |
-        v
-normalizer + live-data refresher
-        |
-        v
-cached/generated app state
-        |
-        v
-Next.js UI
+stable JSON picks -> server-rendered StaticAppData -> dashboard
+
+visible browser -> ESPN scoreboard -> normalize matches -> in-memory snapshot
+                                                       |
+                                                       +-> header / overview / schedule
+                                                       +-> lazy leaderboard derivation
 ```
 
-## Why This Architecture
-
-This is a small app for about 30 people. Most of the data is already known and stable. The app needs a good browsing experience more than it needs a complex backend.
-
-Next.js gives us:
-
-- a modern React app structure
-- route handlers if we need server-side JSON later
-- a good deployment path through Vercel
-- TypeScript support for data-heavy code
-
-Material UI gives us:
-
-- a proven React component system
-- responsive layout primitives for a dense sports dashboard
-- accessible tables, tabs, controls, chips, and alerts
-- theming without creating a custom design system for v1
-
-Plain Vite or static React would work for a bracket-only viewer. Next.js is the better fit for v1 because v1 includes live data and needs server-side provider boundaries, cache headers, API routes, and Vercel deployment hooks.
-
-Local JSON gives us:
-
-- easy inspection
-- simple edits
-- no auth or database maintenance
-- a clear source of truth for v1
-
-## Runtime Modes
-
-### Mode 1: Generated JSON
-
-Generate:
-
-```text
-public/data.json
-```
-
-The UI fetches:
-
-```text
-/data.json
-```
-
-This is the simplest mode and mirrors the friend's app.
-
-Use this only for the static portion of the app or as a fallback snapshot. Runtime serverless code cannot mutate deployed `public/data.json` on Vercel, so this mode is not enough for v1 live data by itself.
-
-### Mode 2: Next.js API Route
-
-Expose:
-
-```text
-GET /api/data
-```
-
-The route returns the same app-state shape as `public/data.json`.
-
-Use this for v1 live data. The route must read cached normalized state. Provider refresh happens through Vercel Cron or authenticated server-to-server calls. Browser requests must not directly fan out to ESPN/FIFA or trigger provider refresh.
-
-### v1 Preference
-
-Use `/api/data` for v1 because live data is in scope.
-
-Refresh modes must stay explicit:
-
-- Static artifact: `public/data.json` is generated before deploy and changes only by rebuild/redeploy; useful as fallback/static seed.
-- API route: `/api/data` returns cached normalized state.
-- Cron: Vercel cron calls `/api/cron/refresh`; it should not be described as rewriting deployed `public/data.json`.
-- Storage: latest live app state should live in Vercel Blob or Redis so it survives function invocations.
-
-## Proposed Structure
-
-```text
-app/
-  layout.tsx
-  page.tsx
-components/
-  AppShell.tsx
-  MemberSelector.tsx
-  OverviewStats.tsx
-  ChampionPicks.tsx
-  GroupPicksView.tsx
-  ThirdPlacePicksView.tsx
-  KnockoutBracket.tsx
-  ComparePicks.tsx
-lib/
-  app-data/
-    buildAppData.ts
-    normalizePicks.ts
-    normalizeMatches.ts
-    refreshLiveData.ts
-  schemas/
-    appData.ts
-    familyPicks.ts
-    matches.ts
-  providers/
-    espn.ts
-data/
-  family_bracket_picks.json
-public/
-  data.json
-scripts/
-  build-data.ts
-app/api/
-  data/route.ts
-  cron/refresh/route.ts
-runtime/
-  raw/
-```
-
-Start as one dashboard page with Material UI tabs/sections. Include provider modules and API routes in v1 because live data is required. Keep detailed file and naming conventions in `project-structure.md`.
-
-## Data Refresh
+## Data Boundaries
 
 Stable data:
 
-- family picks
-- teams
-- members
-- scoring rules
+- teams, participants, and submitted picks
+- scoring rules and league metadata
+- validated once when the page is rendered
 
-Live/changing data:
+Live data:
 
-- match status
-- match scores
-- actual standings
-- actual bracket outcomes
-- leaderboard derived from actual results
+- schedule, match status, scores, clocks, and winners
+- fetched and normalized in the browser
+- retained only for the current page session
 
-Polling should exist only to read live/changing data. For implementation simplicity, the client can poll one app-state endpoint every 30 seconds during live match windows, but that endpoint must serve cached normalized app state. Provider refresh should be cron-controlled or triggered by authenticated server-to-server calls, not caused by browser poll or public UI controls. Vercel Cron uses minute-granularity schedules, so the Vercel-native high-frequency refresh cadence is every minute.
+Derived data:
 
-Recommended v1 live refresh path:
+- group standings, actual knockout results, and leaderboard scores
+- computed from stable picks plus the current match snapshot
+- built only while the Leaderboard tab is active
 
-```text
-Vercel Cron -> /api/cron/refresh -> ESPN fetch -> normalize -> write latest app state to Blob or Redis
-Browser polling -> /api/data -> read latest cached app state
-```
+React components do not receive raw ESPN payloads. `lib/providers/espn.ts` remains the provider boundary and converts the response to the app's `Match` contract.
 
-`public/data.json` can remain as a deploy-time fallback seed, but it is not the live source during the tournament.
+## Polling Lifecycle
 
-## Provider Boundary
+The dashboard:
 
-The browser should never call ESPN, FIFA, or other third-party providers directly.
+1. Renders stable picks immediately.
+2. Fetches ESPN once after mounting.
+3. Polls every 30 seconds while `document.visibilityState` is `visible`.
+4. Stops the interval while hidden.
+5. Refreshes immediately on visibility restoration, window focus, or network reconnect.
+6. Prevents overlapping requests and aborts an active request when unmounted.
 
-Provider code belongs in:
+A successful response replaces the normalized match snapshot atomically. A failed response keeps the last successful in-memory snapshot, marks it stale, and displays a warning. If the first request fails, static tabs remain usable with no live matches or scores.
 
-```text
-lib/providers/
-```
+## Tab-Level Work
 
-Provider output should be normalized before React components see it.
+- Overview and Schedule read normalized matches directly.
+- Participants, Groups, Knockout, and Compare use stable picks and do not aggregate live results.
+- Leaderboard invokes group standings, actual bracket, and scoring derivation through a memoized calculation.
+- Switching away from Leaderboard removes the derived result from the dashboard state; returning recomputes only when required.
 
-This lets us replace ESPN later without rewriting the UI.
+All transformations are immutable. Polling replaces snapshots rather than mutating data used by a mounted tab.
+
+## Provider and Scaling Tradeoffs
+
+The ESPN scoreboard currently allows browser cross-origin requests. This endpoint is not a contracted API, so CORS policy or payload shape can change without notice.
+
+Every visible browser is an independent poller. At a 30-second interval, one continuously visible client can make 120 requests per hour. The expected family-sized audience makes this acceptable for v1, but the architecture should return to a shared cache or managed backend if provider limits, reliability, or audience size become material.
 
 ## Deployment
 
-Recommended deployment: Vercel.
+Vercel builds and serves the Next.js app and creates previews for pushed branches. The application does not require runtime environment variables for ESPN, cron, or Blob.
 
-Initial deployment includes a static seed and live API routes:
+The production checks are:
 
-- build the Next.js app
-- include generated app-state JSON as fallback seed
-- configure `/api/data`
-- configure `/api/cron/refresh`
-- configure Vercel Blob or Redis for latest app-state storage
-- share the deployed URL with family
-
-For live refresh:
-
-- use Vercel cron or an external scheduled job to call `/api/cron/refresh`
-- set `CRON_SECRET` so refresh fails closed outside local development
-- store last-good state in the deploy artifact, external storage, or a committed generated file
-- keep cache windows short during live matches
-
-For v1, the simplest durable last-good live state is a JSON blob in Vercel Blob. Redis is also acceptable if we prefer key-value TTL semantics.
-
-## Caching
-
-For generated JSON:
-
-```text
-cache-control: public, max-age=30
-```
-
-Configure this through `next.config.ts` headers for `/data.json` if we serve a static file. Use `capturedAt` in the JSON so users can see freshness even if caches behave differently than expected.
-
-For API route JSON:
-
-```text
-cache-control: s-maxage=30, stale-while-revalidate=60
-```
-
-Always include `capturedAt` and provider freshness metadata in the app state.
-
-## Failure Handling
-
-If match provider refresh fails:
-
-- keep the last good app state
-- mark match data stale
-- keep picks and bracket views available
-- avoid clearing leaderboard or match data unless explicitly regenerated
-
-If extracted picks validation fails:
-
-- fail the build or data-generation script
-- do not deploy corrupted app-state JSON
+- static picks validate during the production build
+- the browser can reach ESPN from the deployed origin
+- polling pauses and resumes with page visibility
+- provider failure leaves static bracket views operational
 
 ## Security
 
-v1 has no personal accounts.
-
-Minimum rules:
-
-- no provider secrets in browser code
-- no FIFA cookies/tokens in repo
-- no unprotected admin mutation endpoints
-- no browser-exposed provider refresh control
-- treat the app link as semi-private
-
-Launch gate:
-
-- unlisted deployment URL
-- Vercel password protection
-- simple shared-passphrase middleware
-
-Choose one before sharing broadly. For the first private family test, an unlisted URL is acceptable if everyone understands it is not strong access control.
-
-## Implementation Order
-
-1. Scaffold Next.js with TypeScript.
-2. Add schema validation for `data/family_bracket_picks.json`.
-3. Build normalized app-state generation from local picks.
-4. Add match provider adapter and saved fixtures.
-5. Add `/api/data` and cached app-state storage.
-6. Add `/api/cron/refresh` for provider refresh.
-7. Render bracket, schedule, live score, and actual group views.
-8. Deploy v1 with Vercel Cron and Blob/Redis.
-9. Maintain scoring and leaderboard from `data/scoring_rules.json`.
+No secret is shipped to the browser. The ESPN URL is public and embedded in client code. Existing Vercel environment values may remain for older branches, but this branch does not read them.

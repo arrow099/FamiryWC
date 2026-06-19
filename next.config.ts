@@ -1,19 +1,5 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  async headers() {
-    return [
-      {
-        source: "/data.json",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=30",
-          },
-        ],
-      },
-    ];
-  },
-};
+const nextConfig: NextConfig = {};
 
 export default nextConfig;

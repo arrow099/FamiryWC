@@ -1,8 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { POST } from "@/app/api/cron/refresh/route";
+import { describe, expect, it } from "vitest";
 import { buildAppData } from "@/lib/app-data/buildAppData";
 import { normalizePicks } from "@/lib/app-data/normalizePicks";
-import { refreshLiveData } from "@/lib/app-data/refreshLiveData";
 import { buildLeaderboard } from "@/lib/app-data/scoring";
 import { formatTeamLabel } from "@/lib/app-data/teamDisplay";
 import { DEFAULT_ESPN_SCOREBOARD_URL, normalizeEspnScoreboard } from "@/lib/providers/espn";
@@ -10,16 +8,7 @@ import familyPicks from "@/data/family_bracket_picks.json";
 import scoringRules from "@/data/scoring_rules.json";
 import type { AppState, Match } from "@/lib/schemas/appData";
 
-vi.mock("@/lib/app-data/refreshLiveData", () => ({
-  refreshLiveData: vi.fn(),
-}));
-
 describe("app data", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.mocked(refreshLiveData).mockReset();
-  });
-
   it("normalizes extracted family picks into stable app state", () => {
     const state = buildAppData({ capturedAt: "2026-06-18T00:00:00.000Z" });
 
@@ -123,7 +112,7 @@ describe("app data", () => {
           ],
         },
       ],
-    });
+    }, undefined, new Set(["team_mex", "team_rsa"]));
 
     expect(normalized.matches[0]).toMatchObject<Partial<Match>>({
       id: "match_001",
@@ -161,7 +150,7 @@ describe("app data", () => {
           ],
         },
       ],
-    });
+    }, undefined, new Set(["team_mex", "team_rsa"]));
 
     expect(normalized.matches[0]).toMatchObject<Partial<Match>>({
       homeTeamId: null,
@@ -175,45 +164,4 @@ describe("app data", () => {
     expect(DEFAULT_ESPN_SCOREBOARD_URL).toBe("https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260719&limit=200");
   });
 
-  it("requires cron authorization outside local development", async () => {
-    vi.stubEnv("NODE_ENV", "test");
-    vi.stubEnv("CRON_SECRET", "");
-
-    const response = await POST(new Request("http://localhost/api/cron/refresh", { method: "POST" }));
-
-    expect(response.status).toBe(503);
-    expect(refreshLiveData).not.toHaveBeenCalled();
-  });
-
-  it("rejects cron refresh requests with the wrong secret", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("CRON_SECRET", "expected");
-
-    const response = await POST(
-      new Request("http://localhost/api/cron/refresh", {
-        method: "POST",
-        headers: { authorization: "Bearer wrong" },
-      }),
-    );
-
-    expect(response.status).toBe(401);
-    expect(refreshLiveData).not.toHaveBeenCalled();
-  });
-
-  it("allows cron refresh requests with the configured secret", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("CRON_SECRET", "expected");
-    vi.mocked(refreshLiveData).mockResolvedValue(buildAppData({ capturedAt: "2026-06-18T00:00:00.000Z" }));
-
-    const response = await POST(
-      new Request("http://localhost/api/cron/refresh", {
-        method: "POST",
-        headers: { authorization: "Bearer expected" },
-      }),
-    );
-    const json = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(json).toMatchObject({ capturedAt: "2026-06-18T00:00:00.000Z", matches: 0, stale: true });
-  });
 });

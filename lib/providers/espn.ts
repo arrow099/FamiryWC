@@ -1,5 +1,4 @@
 import { matchIdFromIndex, teamIdFromAbbr } from "@/lib/app-data/ids";
-import familyPicks from "@/data/family_bracket_picks.json";
 import { GROUP_IDS, type GroupId, type Match, type MatchStatus } from "@/lib/schemas/appData";
 
 export const DEFAULT_ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260719&limit=200";
@@ -49,21 +48,15 @@ type EspnEvent = {
   competitions?: EspnCompetition[];
 };
 
-type EspnScoreboard = {
+export type EspnScoreboard = {
   events?: EspnEvent[];
 };
 
-let canonicalTeamIds: Set<string> | null = null;
-
-function knownTeamId(abbr: string | undefined): string | null {
+function knownTeamId(abbr: string | undefined, canonicalTeamIds?: ReadonlySet<string>): string | null {
   if (!abbr) return null;
 
   const teamId = teamIdFromAbbr(abbr);
-  if (!canonicalTeamIds) {
-    canonicalTeamIds = new Set((familyPicks as { teams: Array<{ abbr: string }> }).teams.map((team) => teamIdFromAbbr(team.abbr)));
-  }
-
-  return canonicalTeamIds.has(teamId) ? teamId : null;
+  return !canonicalTeamIds || canonicalTeamIds.has(teamId) ? teamId : null;
 }
 
 function normalizeStatus(state: string | undefined): MatchStatus {
@@ -73,8 +66,8 @@ function normalizeStatus(state: string | undefined): MatchStatus {
   return "unknown";
 }
 
-function competitorTeamId(competitor: EspnCompetitor | undefined): string | null {
-  return knownTeamId(competitor?.team?.abbreviation);
+function competitorTeamId(competitor: EspnCompetitor | undefined, canonicalTeamIds?: ReadonlySet<string>): string | null {
+  return knownTeamId(competitor?.team?.abbreviation, canonicalTeamIds);
 }
 
 function competitorTeamName(competitor: EspnCompetitor | undefined): string | null {
@@ -93,7 +86,11 @@ function normalizeStage(event: EspnEvent, group: GroupId | null): Match["stage"]
   return "unknown";
 }
 
-export function normalizeEspnScoreboard(scoreboard: EspnScoreboard, capturedAt = new Date().toISOString()): { matches: Match[]; capturedAt: string } {
+export function normalizeEspnScoreboard(
+  scoreboard: EspnScoreboard,
+  capturedAt = new Date().toISOString(),
+  canonicalTeamIds?: ReadonlySet<string>,
+): { matches: Match[]; capturedAt: string } {
   const events = scoreboard.events ?? [];
   const matches = events.map((event, index): Match => {
     const competition = event.competitions?.[0];
@@ -117,13 +114,13 @@ export function normalizeEspnScoreboard(scoreboard: EspnScoreboard, capturedAt =
       status,
       statusText: competition?.status?.type?.shortDetail ?? competition?.status?.type?.description ?? "Unknown",
       clock: competition?.status?.displayClock ?? null,
-      homeTeamId: competitorTeamId(home),
-      awayTeamId: competitorTeamId(away),
+      homeTeamId: competitorTeamId(home, canonicalTeamIds),
+      awayTeamId: competitorTeamId(away, canonicalTeamIds),
       homeTeamName: competitorTeamName(home),
       awayTeamName: competitorTeamName(away),
       homeScore: Number.isFinite(homeScore) ? homeScore : null,
       awayScore: Number.isFinite(awayScore) ? awayScore : null,
-      winnerTeamId: home?.winner ? competitorTeamId(home) : away?.winner ? competitorTeamId(away) : null,
+      winnerTeamId: home?.winner ? competitorTeamId(home, canonicalTeamIds) : away?.winner ? competitorTeamId(away, canonicalTeamIds) : null,
       venue: {
         name: competition?.venue?.fullName ?? null,
         city: competition?.venue?.address?.city ?? null,
@@ -135,16 +132,17 @@ export function normalizeEspnScoreboard(scoreboard: EspnScoreboard, capturedAt =
   return { matches, capturedAt };
 }
 
-export async function fetchEspnScoreboard(): Promise<{ matches: Match[]; capturedAt: string; message: string | null }> {
-  const url = process.env.ESPN_SCOREBOARD_URL ?? DEFAULT_ESPN_SCOREBOARD_URL;
-
-  const response = await fetch(url, {
+export async function fetchEspnScoreboard(options: {
+  signal?: AbortSignal;
+  canonicalTeamIds?: ReadonlySet<string>;
+  url?: string;
+} = {}): Promise<{ matches: Match[]; capturedAt: string; message: string | null }> {
+  const response = await fetch(options.url ?? DEFAULT_ESPN_SCOREBOARD_URL, {
+    cache: "no-store",
     headers: {
       accept: "application/json",
     },
-    next: {
-      revalidate: 30,
-    },
+    signal: options.signal,
   });
 
   if (!response.ok) {
@@ -152,6 +150,6 @@ export async function fetchEspnScoreboard(): Promise<{ matches: Match[]; capture
   }
 
   const json = (await response.json()) as EspnScoreboard;
-  const normalized = normalizeEspnScoreboard(json);
+  const normalized = normalizeEspnScoreboard(json, new Date().toISOString(), options.canonicalTeamIds);
   return { ...normalized, message: null };
 }

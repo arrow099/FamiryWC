@@ -156,3 +156,19 @@ export type AppState = {
   leaderboard: LeaderboardEntry[];
   scoring: ScoringRules;
 };
+
+export type StaticAppData = {
+  schemaVersion: AppState["schemaVersion"];
+  sources: { picks: AppState["sources"]["picks"] };
+  league: AppState["league"];
+  teams: AppState["teams"];
+  members: AppState["members"];
+  picks: AppState["picks"];
+  scoring: AppState["scoring"];
+};
+
+export type TournamentResults = {
+  groups: AppState["groups"];
+  actualBracket: AppState["actualBracket"];
+  leaderboard: AppState["leaderboard"];
+};
