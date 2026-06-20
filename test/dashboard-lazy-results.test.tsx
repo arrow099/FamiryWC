@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "@/components/Dashboard";
 import { buildStaticAppData } from "@/lib/app-data/buildAppData";
 import * as tournamentResults from "@/lib/app-data/deriveTournamentResults";
@@ -17,16 +17,55 @@ vi.mock("@/hooks/useEspnLiveMatches", () => ({
 }));
 
 describe("Dashboard live derivation", () => {
+  beforeEach(() => {
+    const values = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        clear: () => values.clear(),
+        getItem: (key: string) => values.get(key) ?? null,
+        key: (index: number) => Array.from(values.keys())[index] ?? null,
+        get length() { return values.size; },
+        removeItem: (key: string) => values.delete(key),
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+    });
+  });
   afterEach(() => vi.restoreAllMocks());
 
-  it("builds tournament results only after the Leaderboard tab is selected", () => {
+  it("builds tournament results for the default Leaderboard tab", async () => {
     const buildResults = vi.spyOn(tournamentResults, "buildTournamentResults");
     render(<Dashboard initialData={buildStaticAppData()} />);
 
-    expect(buildResults).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("tab", { name: "Leaderboard" }));
-
     expect(buildResults).toHaveBeenCalled();
-    expect(screen.getByRole("columnheader", { name: "Total" })).toBeVisible();
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Leaderboard",
+      "Groups",
+      "Knockout",
+      "Schedule",
+    ]);
+    expect(screen.queryByRole("tab", { name: "Overview" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Participants" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/50 points per exact current position/)).not.toBeInTheDocument();
+    fireEvent.mouseOver(screen.getByRole("button", { name: "Show scoring rules" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/50 points per exact current position/);
+    expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "Rank",
+      "Participant",
+      "Champion",
+      "Group",
+      "Knockout",
+      "Total",
+    ]);
+  });
+
+  it("restores and updates the last selected dashboard tab", async () => {
+    window.localStorage.setItem("famirywc:last-dashboard-tab", "Schedule");
+    render(<Dashboard initialData={buildStaticAppData()} initialTab="Schedule" />);
+
+    expect(screen.getByRole("tab", { name: "Schedule" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Groups" }));
+    expect(window.localStorage.getItem("famirywc:last-dashboard-tab")).toBe("Groups");
   });
 });

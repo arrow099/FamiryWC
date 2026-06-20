@@ -44,11 +44,10 @@ Admin/operator:
 ## Core User Stories
 
 - As a participant, I can see the overall bracket challenge summary.
-- As a participant, I can select a family member and view their group picks.
+- As a participant, I can compare every player's group picks by group and position.
 - As a participant, I can select a family member and view their third-place advancer picks.
 - As a participant, I can select a family member and view their knockout bracket.
 - As a participant, I can see which teams were most often picked as champion.
-- As a participant, I can see a participant summary table for all 30 members.
 - As a participant, I can compare two players' picks.
 - As a participant, I can see the tournament schedule.
 - As a participant, I can see live match scores and match status.
@@ -79,24 +78,15 @@ Shows:
 - most popular semifinal teams
 - quick links to other views
 
-### Participants
-
-Shows one row per member:
-
-- display name
-- champion pick
-- finalists
-- semifinalists
-- link or action to view full bracket
-
 ### Groups
 
 Shows:
 
-- group selector or grouped cards for Groups A-L
-- player selector
-- selected player's predicted group order
-- consensus count for top group picks
+- one row per player
+- Groups A-L as grouped columns
+- multi-select toggle filter for Groups A-L, defaulting to all groups
+- position 1-4 subcolumns under each group
+- each player's selected team in every position
 
 ### Third-Place Picks
 
@@ -153,14 +143,18 @@ Leaderboard is included in v1 and uses `data/scoring_rules.json`.
 Shows:
 
 - rank
-- member name
-- total points
-- group points
-- third-place points
-- knockout points
-- champion bonus
+- player
 - champion pick
-- scoring breakdown
+- group points
+- knockout points
+- total points
+
+The active scoring model awards 50 points for each exact group finishing position,
+plus 30 points when all four positions in a group are exact. Knockout predictions
+award 20 points for reaching the Round of 16, 30 for reaching the quarterfinals,
+40 for reaching the semifinals, 75 for reaching the final, and 100 for the champion.
+Group-stage scores are provisional during play and are recalculated from the current
+standings as completed and in-progress scores change.
 
 ## Data Requirements
 

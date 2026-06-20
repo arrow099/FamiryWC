@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildAppData } from "@/lib/app-data/buildAppData";
 import { normalizePicks } from "@/lib/app-data/normalizePicks";
 import { buildLeaderboard } from "@/lib/app-data/scoring";
+import { buildGroupStandings } from "@/lib/app-data/standings";
 import { formatTeamLabel } from "@/lib/app-data/teamDisplay";
 import { DEFAULT_ESPN_SCOREBOARD_URL, normalizeEspnScoreboard } from "@/lib/providers/espn";
 import familyPicks from "@/data/family_bracket_picks.json";
@@ -56,7 +57,7 @@ describe("app data", () => {
     expect(() => normalizePicks(brokenKnockout)).toThrow(/R32-1 team1 does not match canonical team table/);
   });
 
-  it("scores completed group, third-place, knockout, and champion results", () => {
+  it("scores the official FIFA group and knockout points", () => {
     const normalized = normalizePicks(familyPicks);
     const firstPick = normalized.picks[0];
     const membersById = new Map(normalized.members.map((member) => [member.id, member.displayName]));
@@ -76,20 +77,80 @@ describe("app data", () => {
         qualificationType: index === 0 ? "group_winner" : index === 1 ? "group_runner_up" : "eliminated",
       })),
     } as AppState["groups"];
-    const actualBracket = {
-      R32: [{ ...firstPick.knockout.R32[0], matchId: "match_001", winnerId: firstPick.knockout.R32[0].winnerId, status: "post" }],
-      R16: [],
-      QF: [],
-      SF: [],
-      F: [{ ...firstPick.knockout.F[0], matchId: "match_064", winnerId: firstPick.championPick, status: "post" }],
-    } as AppState["actualBracket"];
+    const actualBracket = Object.fromEntries(
+      (["R32", "R16", "QF", "SF", "F"] as const).map((round) => [
+        round,
+        [{
+          ...firstPick.knockout[round][0],
+          matchId: `match_${round}`,
+          winnerId: firstPick.knockout[round][0].winnerId,
+          status: "post",
+        }],
+      ]),
+    ) as AppState["actualBracket"];
 
     const leaderboard = buildLeaderboard([firstPick], membersById, groups, actualBracket, scoringRules);
 
-    expect(leaderboard[0].groupPoints).toBeGreaterThan(0);
-    expect(leaderboard[0].knockoutPoints).toBe(14);
-    expect(leaderboard[0].championBonus).toBe(10);
-    expect(leaderboard[0].totalPoints).toBeGreaterThan(20);
+    expect(leaderboard[0].groupPoints).toBe(230);
+    expect(leaderboard[0].knockoutPoints).toBe(265);
+    expect(leaderboard[0].knockoutPointsByRound).toEqual({ R32: 20, R16: 30, QF: 40, SF: 75, F: 100 });
+    expect(leaderboard[0].totalPoints).toBe(495);
+    expect(leaderboard[0].correctPicks).toEqual({ groups: 4, knockout: 5 });
+  });
+
+  it("scores an unfinished group from its current standings", () => {
+    const normalized = normalizePicks(familyPicks);
+    const firstPick = normalized.picks[0];
+    const membersById = new Map(normalized.members.map((member) => [member.id, member.displayName]));
+    const incompleteGroup = {
+      A: firstPick.groups.A.map((pick, index) => ({
+        teamId: pick.teamId,
+        position: pick.position,
+        played: index === 0 ? 2 : 3,
+        won: 0,
+        drawn: 0,
+        lost: 0,
+        goalsFor: 0,
+        goalsAgainst: 0,
+        goalDifference: 0,
+        points: 0,
+        qualified: false,
+        qualificationType: "unknown",
+      })),
+    } as AppState["groups"];
+    const emptyBracket = { R32: [], R16: [], QF: [], SF: [], F: [] } as AppState["actualBracket"];
+
+    const [entry] = buildLeaderboard([firstPick], membersById, incompleteGroup, emptyBracket, scoringRules);
+
+    expect(entry.groupPoints).toBe(230);
+    expect(entry.totalPoints).toBe(230);
+  });
+
+  it("includes in-progress scores in provisional group standings", () => {
+    const standings = buildGroupStandings([{
+      id: "match_live",
+      providerIds: { espn: "live_1" },
+      stage: "group",
+      round: "Group A",
+      group: "A",
+      kickoffAt: "2026-06-20T12:00:00.000Z",
+      status: "in",
+      statusText: "45'",
+      clock: "45:00",
+      homeTeamId: "team_mex",
+      awayTeamId: "team_rsa",
+      homeTeamName: "Mexico",
+      awayTeamName: "South Africa",
+      homeScore: 1,
+      awayScore: 0,
+      winnerTeamId: null,
+      venue: { name: null, city: null, country: null },
+    }]);
+
+    expect(standings.A.map(({ teamId, position, points }) => ({ teamId, position, points }))).toEqual([
+      { teamId: "team_mex", position: 1, points: 3 },
+      { teamId: "team_rsa", position: 2, points: 0 },
+    ]);
   });
 
   it("normalizes ESPN scoreboard fixtures", () => {

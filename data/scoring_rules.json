@@ -1,16 +1,14 @@
 {
-  "scoringVersion": 1,
+  "scoringVersion": 2,
   "rules": {
-    "groupExactPosition": 2,
-    "groupQualified": 1,
-    "thirdPlaceAdvanced": 2,
-    "knockoutWinnerByRound": {
-      "R32": 2,
-      "R16": 4,
-      "QF": 6,
-      "SF": 8,
-      "F": 12
-    },
-    "champion": 10
+    "groupExactPosition": 50,
+    "groupExactBonus": 30,
+    "knockoutAdvancementByRound": {
+      "R32": 20,
+      "R16": 30,
+      "QF": 40,
+      "SF": 75,
+      "F": 100
+    }
   }
 }

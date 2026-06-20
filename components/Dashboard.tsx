@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Alert,
   AppBar,
@@ -9,13 +9,9 @@ import {
   CardContent,
   Chip,
   Container,
-  FormControl,
-  Grid,
-  InputLabel,
+  IconButton,
   LinearProgress,
-  MenuItem,
   Paper,
-  Select,
   Stack,
   Tab,
   Table,
@@ -28,32 +24,32 @@ import {
   Toolbar,
   ToggleButton,
   ToggleButtonGroup,
+  Tooltip,
   Typography,
+  useMediaQuery,
 } from "@mui/material";
-import CompareArrowsIcon from "@mui/icons-material/CompareArrows";
-import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
-import GroupsIcon from "@mui/icons-material/Groups";
-import QueryStatsIcon from "@mui/icons-material/QueryStats";
-import SportsSoccerIcon from "@mui/icons-material/SportsSoccer";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import { useEspnLiveMatches } from "@/hooks/useEspnLiveMatches";
 import { buildTournamentResults, emptyActualBracket, emptyGroups } from "@/lib/app-data/deriveTournamentResults";
 import { selectMobileHeaderMatch } from "@/lib/app-data/headerMatches";
 import { flagForTeam, formatTeamLabel } from "@/lib/app-data/teamDisplay";
-import type { AppState, GroupId, KnockoutPick, Match, Pick, RoundId, StaticAppData, Team } from "@/lib/schemas/appData";
+import {
+  DASHBOARD_TAB_LABELS,
+  LAST_DASHBOARD_TAB_COOKIE_KEY,
+  LAST_DASHBOARD_TAB_STORAGE_KEY,
+  dashboardTabIndex,
+} from "@/lib/dashboardPreferences";
+import type { AppState, GroupId, Match, RoundId, StaticAppData, Team } from "@/lib/schemas/appData";
 import { GROUP_IDS, ROUND_IDS } from "@/lib/schemas/appData";
 
 type MatchStatusChipColor = "default" | "error" | "success" | "warning";
 type ScheduleFilter = "today" | "upcoming" | "past" | "all";
 
-const TAB_LABELS = ["Overview", "Participants", "Groups", "Knockout", "Schedule", "Compare", "Leaderboard"] as const;
 const TAB_DESCRIPTIONS = [
-  "Tournament consensus and league-wide trends",
-  "Everyone in the pool and their champion pick",
-  "Review each participant's group-stage predictions",
-  "Follow every participant's path to the trophy",
-  "Live, upcoming, and completed tournament matches",
-  "See where two brackets agree and diverge",
   "Current points and scoring breakdown",
+  "Compare every player's group-stage predictions",
+  "Compare every player's knockout predictions",
+  "Live, upcoming, and completed tournament matches",
 ] as const;
 const BRACKET_ROUND_LABELS: Record<RoundId, string> = {
   R32: "Round of 32",
@@ -62,44 +58,18 @@ const BRACKET_ROUND_LABELS: Record<RoundId, string> = {
   SF: "Semifinals",
   F: "Final",
 };
-const BRACKET_CARD_WIDTH = 132;
-const BRACKET_COLUMN_GAP = 8;
-const BRACKET_SIDE_MIN_WIDTH = BRACKET_CARD_WIDTH * 4 + BRACKET_COLUMN_GAP * 3;
-const BRACKET_FINAL_LANE_WIDTH = BRACKET_CARD_WIDTH + 72;
-const BRACKET_ROW_HEIGHT = 86;
-const BRACKET_SIDE_ROWS = 8;
 const MATCH_FINAL_DISPLAY_DELAY_MS = 2.5 * 60 * 60 * 1000;
 const SCHEDULE_FILTERS: Array<{ label: string; value: ScheduleFilter }> = [
+  { label: "All", value: "all" },
   { label: "Today", value: "today" },
   { label: "Upcoming", value: "upcoming" },
   { label: "Past", value: "past" },
-  { label: "All", value: "all" },
 ];
 
 function teamLabelText(teamMap: Map<string, Team>, teamId: string | null | undefined): string {
   if (!teamId) return "-";
   const team = teamMap.get(teamId);
   return team ? formatTeamLabel(team) : teamId;
-}
-
-function teamListText(teamMap: Map<string, Team>, teamIds: Array<string | null | undefined>): string {
-  const labels = teamIds.filter(Boolean).map((teamId) => teamLabelText(teamMap, teamId));
-  return labels.length > 0 ? labels.join(", ") : "-";
-}
-
-function sameSet(a: Array<string | null | undefined>, b: Array<string | null | undefined>): boolean {
-  const left = new Set(a.filter(Boolean));
-  const right = new Set(b.filter(Boolean));
-  return left.size === right.size && Array.from(left).every((value) => right.has(value));
-}
-
-function finalistIds(pick: Pick): string[] {
-  const final = pick.knockout.F[0];
-  return final ? [final.team1Id, final.team2Id] : [];
-}
-
-function roundTeamIds(pick: Pick, round: "QF" | "SF"): string[] {
-  return pick.knockout[round].flatMap((match) => [match.team1Id, match.team2Id]);
 }
 
 function TeamLabel({ teamMap, teamId }: { teamMap: Map<string, Team>; teamId: string | null | undefined }) {
@@ -176,6 +146,23 @@ function formatMatchTime(value: string | null): string {
 function formatScheduleKickoff(value: string | null): string {
   if (!value) return "TBD";
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York", timeZoneName: "short" }).format(new Date(value));
+}
+
+function ScheduleKickoff({ value }: { value: string | null }) {
+  if (!value) return "TBD";
+  const kickoff = new Date(value);
+  const date = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "America/New_York" }).format(kickoff);
+  const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(kickoff);
+
+  return (
+    <>
+      <Box component="span" sx={{ display: { xs: "block", sm: "none" }, fontSize: "0.75rem", lineHeight: 1.3 }}>
+        <Box component="span" sx={{ display: "block", whiteSpace: "nowrap" }}>{date}</Box>
+        <Box component="span" sx={{ display: "block", whiteSpace: "nowrap" }}>{time} ET</Box>
+      </Box>
+      <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>{formatScheduleKickoff(value)}</Box>
+    </>
+  );
 }
 
 function easternDateKey(value: Date | string): string {
@@ -311,110 +298,6 @@ function TodayMatches({ state, teamMap }: { state: AppState; teamMap: Map<string
   );
 }
 
-function countBy<T>(items: T[], getKey: (item: T) => string | null | undefined): Array<[string, number]> {
-  const counts = new Map<string, number>();
-  for (const item of items) {
-    const key = getKey(item);
-    if (!key) continue;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-}
-
-function StatCard({ icon, label, value }: { icon: ReactNode; label: string; value: string | number }) {
-  return (
-    <Card sx={{ height: "100%" }}>
-      <CardContent sx={{ height: "100%" }}>
-        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ height: "100%" }}>
-          <Box
-            sx={{
-              alignItems: "center",
-              bgcolor: "primary.main",
-              borderRadius: 2.5,
-              color: "primary.contrastText",
-              display: "flex",
-              flex: "0 0 auto",
-              height: 44,
-              justifyContent: "center",
-              width: 44,
-              "& svg": { color: "inherit" },
-            }}
-          >
-            {icon}
-          </Box>
-          <Box>
-            <Typography variant="h2">{value}</Typography>
-            <Typography color="text.secondary" variant="body2" sx={{ mt: 0.25 }}>
-              {label}
-            </Typography>
-          </Box>
-        </Stack>
-      </CardContent>
-    </Card>
-  );
-}
-
-function PickSelector({ members, selectedMemberId, onChange }: { members: AppState["members"]; selectedMemberId: string; onChange: (memberId: string) => void }) {
-  return (
-    <FormControl size="small" sx={{ minWidth: { sm: 240 }, width: { xs: "100%", sm: 280 } }}>
-      <InputLabel id="member-select-label">Member</InputLabel>
-      <Select labelId="member-select-label" label="Member" value={selectedMemberId} onChange={(event) => onChange(event.target.value)}>
-        {members.map((member) => (
-          <MenuItem key={member.id} value={member.id}>
-            {member.displayName}
-          </MenuItem>
-        ))}
-      </Select>
-    </FormControl>
-  );
-}
-
-function Bars({ rows, teamMap, maxRows = 10 }: { rows: Array<[string, number]>; teamMap: Map<string, Team>; maxRows?: number }) {
-  const topRows = rows.slice(0, maxRows);
-  const max = Math.max(1, ...topRows.map(([, count]) => count));
-  return (
-    <Stack spacing={1.25}>
-      {topRows.map(([teamId, count]) => (
-        <Box key={teamId}>
-          <Stack direction="row" justifyContent="space-between" spacing={2} alignItems="center">
-            <Typography variant="body2" fontWeight={700}>
-              <TeamLabel teamMap={teamMap} teamId={teamId} />
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {count}
-            </Typography>
-          </Stack>
-          <LinearProgress variant="determinate" value={(count / max) * 100} sx={{ height: 8, borderRadius: 1, mt: 0.5 }} />
-        </Box>
-      ))}
-    </Stack>
-  );
-}
-
-function GroupConsensusList({ rows }: { rows: Array<{ group: GroupId; label: ReactNode; count: number }> }) {
-  const max = Math.max(1, ...rows.map((row) => row.count));
-  return (
-    <Stack spacing={1.25}>
-      {rows.map((row) => (
-        <Box key={row.group}>
-          <Stack direction="row" justifyContent="space-between" spacing={2} alignItems="center">
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
-              <Chip size="small" label={row.group} sx={{ fontWeight: 900 }} />
-              <Typography variant="body2" fontWeight={700}>
-                {row.label}
-              </Typography>
-            </Stack>
-            <Typography variant="body2" color="text.secondary">
-              {row.count}
-            </Typography>
-          </Stack>
-          <LinearProgress variant="determinate" value={(row.count / max) * 100} sx={{ height: 8, borderRadius: 1, mt: 0.5 }} />
-        </Box>
-      ))}
-    </Stack>
-  );
-}
-
 function MobileScrollHint({ children }: { children: ReactNode }) {
   return (
     <Typography variant="caption" color="text.secondary" sx={{ display: { xs: "block", sm: "none" }, fontWeight: 700 }}>
@@ -423,288 +306,178 @@ function MobileScrollHint({ children }: { children: ReactNode }) {
   );
 }
 
-function Overview({ state, teamMap }: { state: AppState; teamMap: Map<string, Team> }) {
-  const championCounts = countBy(state.picks, (pick) => pick.championPick);
-  const topGroupPicks = GROUP_IDS.map((group) => {
-    const top = countBy(state.picks, (pick) => pick.groups[group][0]?.teamId)[0];
-    return {
-      group,
-      label: <TeamLabel teamMap={teamMap} teamId={top?.[0]} />,
-      count: top?.[1] ?? 0,
-    };
-  });
-  const topThirdPlacePicks = countBy(
-    state.picks.flatMap((pick) => pick.thirdPlaceAdvancers),
-    (teamId) => teamId,
-  );
+const COMPARISON_PLAYER_COLUMN_WIDTH = { xs: 87, sm: 150 } as const;
+const COMPARISON_PICK_COLUMN_WIDTH = 76;
+const COMPARISON_BODY_ROW_HEIGHT = 34;
+const comparisonStickyPlayerCellSx = {
+  bgcolor: "background.paper",
+  borderRight: "1px solid",
+  borderRightColor: "divider",
+  left: 0,
+  maxWidth: COMPARISON_PLAYER_COLUMN_WIDTH,
+  minWidth: COMPARISON_PLAYER_COLUMN_WIDTH,
+  overflow: "hidden",
+  position: "sticky",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  width: COMPARISON_PLAYER_COLUMN_WIDTH,
+  zIndex: 2,
+} as const;
+const comparisonTableSx = {
+  "& .MuiTableCell-root": {
+    fontSize: { xs: "0.7rem", sm: "0.78rem" },
+    lineHeight: 1.25,
+    px: 0.75,
+    py: 0.5,
+  },
+} as const;
 
-  return (
-    <Stack spacing={{ xs: 2, md: 2.5 }}>
-      <Box
-        sx={{
-          display: "grid",
-          gap: { xs: 1.5, md: 2 },
-          gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" },
-        }}
-      >
-        <Box sx={{ minWidth: 0 }}>
-          <StatCard icon={<GroupsIcon color="primary" />} label="Players" value={state.league.playerCount} />
-        </Box>
-        <Box sx={{ minWidth: 0 }}>
-          <StatCard icon={<SportsSoccerIcon color="primary" />} label="Teams" value={state.league.teamCount} />
-        </Box>
-        <Box sx={{ minWidth: 0 }}>
-          <StatCard icon={<EmojiEventsIcon color="primary" />} label="Champion Picks" value={championCounts.length} />
-        </Box>
-        <Box sx={{ minWidth: 0 }}>
-          <StatCard icon={<QueryStatsIcon color="primary" />} label="Live Matches" value={state.matches.length} />
-        </Box>
-      </Box>
-
-      <Box
-        sx={{
-          display: "grid",
-          gap: 2,
-          gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(3, minmax(0, 1fr))" },
-        }}
-      >
-        <Box sx={{ display: "flex", minWidth: 0 }}>
-          <Card sx={{ width: "100%" }}>
-            <CardContent>
-              <Typography variant="h3" sx={{ mb: 2 }}>
-                Champion Picks
-              </Typography>
-              <Bars rows={championCounts} teamMap={teamMap} />
-            </CardContent>
-          </Card>
-        </Box>
-        <Box sx={{ display: "flex", minWidth: 0 }}>
-          <Card sx={{ width: "100%" }}>
-            <CardContent>
-              <Typography variant="h3" sx={{ mb: 2 }}>
-                Top Group Picks
-              </Typography>
-              <GroupConsensusList rows={topGroupPicks} />
-            </CardContent>
-          </Card>
-        </Box>
-        <Box sx={{ display: "flex", minWidth: 0 }}>
-          <Card sx={{ width: "100%" }}>
-            <CardContent>
-              <Typography variant="h3" sx={{ mb: 2 }}>
-                Top Third-Place Picks
-              </Typography>
-              <Bars rows={topThirdPlacePicks} teamMap={teamMap} />
-            </CardContent>
-          </Card>
-        </Box>
-      </Box>
-    </Stack>
-  );
-}
-
-function Participants({ state, teamMap, onViewBracket }: { state: AppState; teamMap: Map<string, Team>; onViewBracket: (memberId: string) => void }) {
+function GroupsView({ state, teamMap }: { state: AppState; teamMap: Map<string, Team> }) {
+  const [selectedGroups, setSelectedGroups] = useState<GroupId[]>([...GROUP_IDS]);
   const picksByMember = new Map(state.picks.map((pick) => [pick.memberId, pick]));
+
   return (
-    <TableContainer component={Paper} variant="outlined">
-      <Table
-        size="small"
+    <Stack spacing={{ xs: 1.5, md: 2 }}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        spacing={1}
+        alignItems={{ xs: "stretch", sm: "center" }}
+        justifyContent="space-between"
         sx={{
-          tableLayout: "fixed",
-          width: "100%",
-          "& .MuiTableCell-root": { px: { xs: 0.75, sm: 2 } },
+          borderBottom: "1px solid",
+          borderColor: "divider",
+          pb: 1.5,
         }}
       >
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ width: { xs: "52%", sm: "auto" } }}>Member</TableCell>
-            <TableCell align="center" sx={{ width: { xs: "27%", sm: "auto" } }}>Champion</TableCell>
-            <TableCell align="center" sx={{ width: { xs: "21%", sm: "auto" } }}>Bracket</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {state.members.map((member) => {
-            const pick = picksByMember.get(member.id);
-            return (
-              <TableRow key={member.id}>
-                <TableCell sx={{ overflowWrap: "anywhere" }}>{member.displayName}</TableCell>
-                <TableCell align="center">
-                  <Box sx={{ display: "flex", justifyContent: "center" }}>
-                    <TeamLabel teamMap={teamMap} teamId={pick?.championPick} />
-                  </Box>
-                </TableCell>
-                <TableCell align="center">
-                  <Chip label="View" size="small" clickable onClick={() => onViewBracket(member.id)} />
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
-}
-
-function GroupsView({ state, pick, teamMap }: { state: AppState; pick: Pick; teamMap: Map<string, Team> }) {
-  const thirdPlaceAdvancers = new Set(pick.thirdPlaceAdvancers);
-  return (
-    <Grid container spacing={{ xs: 1.5, md: 2 }} alignItems="stretch">
-      {GROUP_IDS.map((group) => {
-        const winnerCounts = countBy(state.picks, (item) => item.groups[group][0]?.teamId);
-        const winnerCountMap = new Map(winnerCounts);
-        return (
-          <Grid key={group} item xs={12} sm={6} lg={3} sx={{ display: "flex" }}>
-            <Card sx={{ width: "100%" }}>
-              <CardContent>
-                <Typography variant="h3" sx={{ mb: 1.5 }}>
-                  Group {group}
-                </Typography>
-                <Stack spacing={0.5}>
-                  {pick.groups[group].map((groupPick) => (
-                    <Stack
-                      key={groupPick.position}
-                      direction="row"
-                      spacing={1}
-                      alignItems="center"
-                      justifyContent="space-between"
-                      sx={{ borderRadius: 2, minHeight: 42, px: 0.75, py: 0.5, "&:nth-of-type(odd)": { bgcolor: "grey.50" } }}
-                    >
-                      <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
-                        <Chip size="small" label={groupPick.position} color={groupPick.position <= 2 ? "primary" : "default"} sx={{ minWidth: 28 }} />
-                        <Typography component="div">
-                          <TeamLabel teamMap={teamMap} teamId={groupPick.teamId} />
-                        </Typography>
-                      </Stack>
-                      <Stack direction="row" spacing={0.75} alignItems="center" sx={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
-                        {thirdPlaceAdvancers.has(groupPick.teamId) ? <Chip size="small" variant="outlined" color="secondary" label="Top 3rd Pick" /> : null}
-                        {groupPick.position === 1 ? (
-                          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, whiteSpace: "nowrap" }}>
-                            Picked by {winnerCountMap.get(groupPick.teamId) ?? 0}/{state.members.length}
-                          </Typography>
-                        ) : null}
-                      </Stack>
-                    </Stack>
-                  ))}
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        );
-      })}
-    </Grid>
-  );
-}
-
-function bracketRowStart(roundDepth: number, matchIndex: number): number {
-  return matchIndex * 2 ** roundDepth + 1;
-}
-
-function bracketRowSpan(roundDepth: number): number {
-  return 2 ** roundDepth;
-}
-
-function BracketTeamRow({ teamMap, teamId, winnerId }: { teamMap: Map<string, Team>; teamId: string; winnerId: string }) {
-  const isWinner = teamId === winnerId;
-  return (
-    <Box
-      sx={{
-        alignItems: "center",
-        bgcolor: isWinner ? "success.light" : "transparent",
-        border: "1px solid",
-        borderColor: isWinner ? "success.main" : "divider",
-        borderRadius: 1,
-        color: isWinner ? "success.contrastText" : "text.primary",
-        display: "flex",
-        justifyContent: "space-between",
-        minHeight: 22,
-        px: 0.6,
-        "& .MuiBox-root": {
-          color: "inherit",
-        },
-      }}
-    >
-      <TeamLabel teamMap={teamMap} teamId={teamId} />
-    </Box>
-  );
-}
-
-function BracketMatchCard({ match, teamMap }: { match: KnockoutPick; teamMap: Map<string, Team> }) {
-  return (
-    <Paper
-      variant="outlined"
-      sx={{
-        bgcolor: "background.paper",
-        p: 0.5,
-        position: "relative",
-        width: BRACKET_CARD_WIDTH,
-      }}
-    >
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: "0.62rem", fontWeight: 800, lineHeight: 1, mb: 0.4 }}>
-        Match {match.bracketId}
-      </Typography>
-      <Stack spacing={0.5}>
-        <BracketTeamRow teamMap={teamMap} teamId={match.team1Id} winnerId={match.winnerId} />
-        <BracketTeamRow teamMap={teamMap} teamId={match.team2Id} winnerId={match.winnerId} />
+        <Typography variant="h3" sx={{ alignSelf: { sm: "center" }, display: { xs: "none", sm: "block" } }}>
+          Group Filter
+        </Typography>
+        <ToggleButtonGroup
+          size="small"
+          value={selectedGroups.length === GROUP_IDS.length ? ["ALL"] : selectedGroups}
+          onChange={(_, values: string[]) => {
+            const currentlyAll = selectedGroups.length === GROUP_IDS.length;
+            const requestedGroups = GROUP_IDS.filter((group) => values.includes(group));
+            if (values.includes("ALL") && !currentlyAll) {
+              setSelectedGroups([...GROUP_IDS]);
+            } else if (currentlyAll && requestedGroups.length > 0) {
+              setSelectedGroups(requestedGroups);
+            } else if (requestedGroups.length > 0) {
+              setSelectedGroups(requestedGroups);
+            } else {
+              setSelectedGroups([...GROUP_IDS]);
+            }
+          }}
+          aria-label="Group filter"
+          sx={{
+            display: { xs: "flex", sm: "grid" },
+            flexWrap: { xs: "wrap", sm: "nowrap" },
+            gap: 0.5,
+            gridTemplateColumns: { sm: "repeat(7, 36px)" },
+            justifyContent: { xs: "start", sm: "end" },
+            width: { xs: "100%", sm: "auto" },
+            "& .MuiToggleButtonGroup-grouped": {
+              border: 0,
+              borderRadius: 1,
+              color: "text.secondary",
+              flex: { xs: "1 1 calc((100% - 24px) / 7)", sm: "0 0 auto" },
+              fontSize: "0.7rem",
+              fontWeight: 800,
+              minHeight: 26,
+              minWidth: 0,
+              px: 0.5,
+              py: 0.25,
+              textTransform: "none",
+              "&.Mui-selected": {
+                bgcolor: "primary.main",
+                color: "primary.contrastText",
+              },
+              "&.Mui-selected:hover": {
+                bgcolor: "primary.dark",
+              },
+            },
+            "@media (min-width: 900px)": {
+              gridTemplateColumns: "repeat(13, 36px)",
+            },
+          }}
+        >
+          <ToggleButton value="ALL" aria-label="Show all groups">All</ToggleButton>
+          {GROUP_IDS.map((group) => (
+            <ToggleButton key={group} value={group} aria-label={`Show Group ${group}`}>{group}</ToggleButton>
+          ))}
+        </ToggleButtonGroup>
       </Stack>
-    </Paper>
-  );
-}
-
-type BracketSideRound = {
-  depth: number;
-  matches: KnockoutPick[];
-  round: Exclude<RoundId, "F">;
-};
-
-function BracketSideGrid({ rounds, teamMap }: { rounds: BracketSideRound[]; teamMap: Map<string, Team> }) {
-  return (
-    <Box
-      sx={{
-        display: "grid",
-        gap: 1,
-        gridTemplateColumns: `repeat(${rounds.length}, minmax(${BRACKET_CARD_WIDTH}px, 1fr))`,
-        gridTemplateRows: `repeat(${BRACKET_SIDE_ROWS}, ${BRACKET_ROW_HEIGHT}px)`,
-        justifyItems: "center",
-        minWidth: BRACKET_SIDE_MIN_WIDTH,
-        position: "relative",
-        width: "100%",
-      }}
-    >
-      {rounds.map(({ depth, matches, round }, roundIndex) => {
-        return (
-          <Box key={round} sx={{ display: "contents" }}>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{
-                fontSize: "0.65rem",
-                fontWeight: 900,
-                alignSelf: "start",
-                gridColumn: roundIndex + 1,
-                gridRow: "1",
-                justifySelf: "center",
-                letterSpacing: 0,
-                textAlign: "center",
-                textTransform: "uppercase",
-                transform: "translateY(-22px)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {BRACKET_ROUND_LABELS[round]}
-            </Typography>
-            {matches.map((match, matchIndex) => {
-              const rowStart = bracketRowStart(depth, matchIndex);
-              const rowSpan = bracketRowSpan(depth);
+      <MobileScrollHint>Scroll horizontally to compare all group picks</MobileScrollHint>
+      <TableContainer component={Paper} variant="outlined" sx={{ maxWidth: "100%", overflowX: "auto" }}>
+        <Table
+          size="small"
+          sx={{
+            ...comparisonTableSx,
+            minWidth: {
+              xs: COMPARISON_PLAYER_COLUMN_WIDTH.xs + selectedGroups.length * 4 * COMPARISON_PICK_COLUMN_WIDTH,
+              sm: COMPARISON_PLAYER_COLUMN_WIDTH.sm + selectedGroups.length * 4 * COMPARISON_PICK_COLUMN_WIDTH,
+            },
+          }}
+        >
+          <TableHead>
+            <TableRow>
+              <TableCell rowSpan={2} sx={{ ...comparisonStickyPlayerCellSx, top: 0, zIndex: 4, fontWeight: 900 }}>
+                Participant
+              </TableCell>
+              {selectedGroups.map((group) => (
+                <TableCell key={group} align="center" colSpan={4} sx={{ bgcolor: "grey.100", borderLeft: "1px solid", borderLeftColor: "divider", fontWeight: 900 }}>
+                  Group {group}
+                </TableCell>
+              ))}
+            </TableRow>
+            <TableRow>
+              {selectedGroups.flatMap((group) => [1, 2, 3, 4].map((position) => (
+                <TableCell
+                  key={`${group}-${position}`}
+                  align="center"
+                  sx={{ minWidth: COMPARISON_PICK_COLUMN_WIDTH, whiteSpace: "nowrap", ...(position === 1 ? { borderLeft: "1px solid", borderLeftColor: "divider" } : {}) }}
+                >
+                  Pos {position}
+                </TableCell>
+              )))}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {state.members.map((member) => {
+              const pick = picksByMember.get(member.id);
               return (
-                <Box key={match.slotId} sx={{ alignSelf: "center", gridColumn: roundIndex + 1, gridRow: `${rowStart} / span ${rowSpan}`, justifySelf: "center", position: "relative" }}>
-                  <BracketMatchCard match={match} teamMap={teamMap} />
-                </Box>
+                <TableRow key={member.id} hover sx={{ height: COMPARISON_BODY_ROW_HEIGHT }}>
+                  <TableCell component="th" scope="row" title={member.displayName} sx={{ ...comparisonStickyPlayerCellSx, fontWeight: 800 }}>
+                    {member.displayName}
+                  </TableCell>
+                  {selectedGroups.flatMap((group) => [1, 2, 3, 4].map((position) => {
+                    const teamId = pick?.groups[group].find((groupPick) => groupPick.position === position)?.teamId;
+                    const currentTeamId = state.groups[group].find((standing) => standing.position === position)?.teamId;
+                    const isCorrectPosition = Boolean(teamId && teamId === currentTeamId);
+                    return (
+                      <TableCell key={`${group}-${position}`} sx={{ minWidth: COMPARISON_PICK_COLUMN_WIDTH, ...(position === 1 ? { borderLeft: "1px solid", borderLeftColor: "divider" } : {}) }}>
+                        <Box
+                          data-correct-position={isCorrectPosition ? "true" : undefined}
+                          sx={{
+                            border: "1px solid",
+                            borderColor: isCorrectPosition ? "success.main" : "transparent",
+                            borderRadius: 1,
+                            px: 0.5,
+                            py: 0.25,
+                          }}
+                        >
+                          <TeamLabel teamMap={teamMap} teamId={teamId} />
+                        </Box>
+                      </TableCell>
+                    );
+                  }))}
+                </TableRow>
               );
             })}
-          </Box>
-        );
-      })}
-    </Box>
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Stack>
   );
 }
 
@@ -747,7 +520,7 @@ function ScheduleTable({ title, matches, teamMap }: { title: string; matches: Ma
           <Table size="small" sx={{ minWidth: { xs: 0, sm: 1060 }, tableLayout: "fixed" }}>
             <TableHead>
               <TableRow>
-                <TableCell sx={{ width: { xs: "32%", sm: 150 } }}>Kickoff</TableCell>
+                <TableCell sx={{ textAlign: { xs: "center", sm: "left" }, width: { xs: "32%", sm: 150 } }}>Kickoff</TableCell>
                 <TableCell align="center" sx={{ display: { xs: "none", sm: "table-cell" }, width: 120 }}>Group</TableCell>
                 <TableCell align="center" sx={{ width: { xs: "48%", sm: 230 } }}>Match</TableCell>
                 <TableCell align="center" sx={{ display: { xs: "none", sm: "table-cell" }, width: 110 }}>Status</TableCell>
@@ -760,7 +533,7 @@ function ScheduleTable({ title, matches, teamMap }: { title: string; matches: Ma
                 const statusChip = matchStatusChip(match);
                 return (
                   <TableRow key={match.id}>
-                    <TableCell>{formatScheduleKickoff(match.kickoffAt)}</TableCell>
+                    <TableCell sx={{ px: { xs: 0.75, sm: 2 }, textAlign: { xs: "center", sm: "left" } }}><ScheduleKickoff value={match.kickoffAt} /></TableCell>
                     <TableCell align="center" sx={{ display: { xs: "none", sm: "table-cell" } }}>{match.group ? `Group ${match.group}` : match.round}</TableCell>
                     <TableCell align="center">
                       <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" flexWrap="wrap">
@@ -787,84 +560,140 @@ function ScheduleTable({ title, matches, teamMap }: { title: string; matches: Ma
   );
 }
 
-function KnockoutView({ pick, teamMap }: { pick: Pick; teamMap: Map<string, Team> }) {
-  const leftRounds: BracketSideRound[] = [
-    { depth: 0, matches: pick.knockout.R32.slice(0, 8), round: "R32" },
-    { depth: 1, matches: pick.knockout.R16.slice(0, 4), round: "R16" },
-    { depth: 2, matches: pick.knockout.QF.slice(0, 2), round: "QF" },
-    { depth: 3, matches: pick.knockout.SF.slice(0, 1), round: "SF" },
-  ];
-  const rightRounds: BracketSideRound[] = [
-    { depth: 3, matches: pick.knockout.SF.slice(1, 2), round: "SF" },
-    { depth: 2, matches: pick.knockout.QF.slice(2, 4), round: "QF" },
-    { depth: 1, matches: pick.knockout.R16.slice(4, 8), round: "R16" },
-    { depth: 0, matches: pick.knockout.R32.slice(8, 16), round: "R32" },
-  ];
-  const final = pick.knockout.F[0];
+function KnockoutView({ state, teamMap }: { state: AppState; teamMap: Map<string, Team> }) {
+  const [selectedRounds, setSelectedRounds] = useState<RoundId[]>([...ROUND_IDS]);
+  const picksByMember = new Map(state.picks.map((pick) => [pick.memberId, pick]));
+  const visibleMatchCount = selectedRounds.reduce(
+    (total, round) => total + (state.picks[0]?.knockout[round].length ?? 0),
+    0,
+  );
 
   return (
-    <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+    <Stack spacing={{ xs: 1.5, md: 2 }}>
       <Stack
         direction={{ xs: "column", sm: "row" }}
-        spacing={0.5}
-        alignItems={{ sm: "center" }}
+        spacing={1}
+        alignItems={{ xs: "stretch", sm: "center" }}
         justifyContent="space-between"
-        sx={{ bgcolor: "grey.50", borderBottom: "1px solid", borderColor: "divider", px: { xs: 2, sm: 2.5 }, py: 1.5 }}
+        sx={{ borderBottom: "1px solid", borderColor: "divider", pb: 1.5 }}
       >
-        <Typography variant="h3">Tournament bracket</Typography>
-        <MobileScrollHint>Scroll horizontally to inspect the full bracket</MobileScrollHint>
-      </Stack>
-      <Box sx={{ overflowX: "auto", px: { xs: 1.5, sm: 2.5 }, pb: 2.5, pt: 4.5, scrollbarWidth: "thin" }}>
-        <Box
+        <Typography variant="h3" sx={{ alignSelf: { sm: "center" }, display: { xs: "none", sm: "block" } }}>
+          Round Filter
+        </Typography>
+        <ToggleButtonGroup
+          size="small"
+          value={selectedRounds.length === ROUND_IDS.length ? ["ALL"] : selectedRounds}
+          onChange={(_, values: string[]) => {
+            const currentlyAll = selectedRounds.length === ROUND_IDS.length;
+            const requestedRounds = ROUND_IDS.filter((round) => values.includes(round));
+            if (values.includes("ALL") && !currentlyAll) {
+              setSelectedRounds([...ROUND_IDS]);
+            } else if (currentlyAll && requestedRounds.length > 0) {
+              setSelectedRounds(requestedRounds);
+            } else if (requestedRounds.length > 0) {
+              setSelectedRounds(requestedRounds);
+            } else {
+              setSelectedRounds([...ROUND_IDS]);
+            }
+          }}
+          aria-label="Round filter"
           sx={{
-            alignItems: "stretch",
             display: "grid",
-            gap: 1,
-            gridTemplateColumns: `minmax(${BRACKET_SIDE_MIN_WIDTH}px, 1fr) ${BRACKET_FINAL_LANE_WIDTH}px minmax(${BRACKET_SIDE_MIN_WIDTH}px, 1fr)`,
-            minWidth: BRACKET_SIDE_MIN_WIDTH * 2 + BRACKET_FINAL_LANE_WIDTH + BRACKET_COLUMN_GAP * 2,
-            width: "100%",
+            gap: 0.5,
+            gridTemplateColumns: "repeat(6, minmax(44px, auto))",
+            justifyContent: { xs: "start", sm: "end" },
+            width: { xs: "100%", sm: "auto" },
+            "& .MuiToggleButtonGroup-grouped": {
+              border: 0,
+              borderRadius: 1,
+              color: "text.secondary",
+              fontSize: "0.7rem",
+              fontWeight: 800,
+              minHeight: 26,
+              minWidth: 0,
+              px: 0.75,
+              py: 0.25,
+              textTransform: "none",
+              "&.Mui-selected": { bgcolor: "primary.main", color: "primary.contrastText" },
+              "&.Mui-selected:hover": { bgcolor: "primary.dark" },
+            },
           }}
         >
-          <BracketSideGrid rounds={leftRounds} teamMap={teamMap} />
-          <Box
-            sx={{
-              alignItems: "center",
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1fr)",
-              gridTemplateRows: `repeat(${BRACKET_SIDE_ROWS}, ${BRACKET_ROW_HEIGHT}px)`,
-              justifyItems: "center",
-              width: "100%",
-            }}
-          >
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{
-                fontSize: "0.65rem",
-                fontWeight: 900,
-                alignSelf: "start",
-                gridColumn: "1",
-                gridRow: "1",
-                justifySelf: "center",
-                letterSpacing: 0,
-                textAlign: "center",
-                textTransform: "uppercase",
-                transform: "translateY(-22px)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {BRACKET_ROUND_LABELS.F}
-            </Typography>
-            {final ? (
-              <Box sx={{ alignSelf: "center", gridColumn: "1", gridRow: `1 / span ${BRACKET_SIDE_ROWS}`, justifySelf: "center" }}>
-                <BracketMatchCard match={final} teamMap={teamMap} />
-              </Box>
-            ) : null}
-          </Box>
-          <BracketSideGrid rounds={rightRounds} teamMap={teamMap} />
-        </Box>
-      </Box>
-    </Paper>
+          <ToggleButton value="ALL" aria-label="Show all rounds">All</ToggleButton>
+          {ROUND_IDS.map((round) => (
+            <ToggleButton key={round} value={round} aria-label={`Show ${BRACKET_ROUND_LABELS[round]}`}>
+              {round}
+            </ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+      </Stack>
+      <MobileScrollHint>Scroll horizontally to compare all knockout picks</MobileScrollHint>
+      <TableContainer component={Paper} variant="outlined" sx={{ maxWidth: "100%", overflowX: "auto" }}>
+        <Table
+          size="small"
+          sx={{
+            ...comparisonTableSx,
+            minWidth: {
+              xs: COMPARISON_PLAYER_COLUMN_WIDTH.xs + visibleMatchCount * COMPARISON_PICK_COLUMN_WIDTH,
+              sm: COMPARISON_PLAYER_COLUMN_WIDTH.sm + visibleMatchCount * COMPARISON_PICK_COLUMN_WIDTH,
+            },
+          }}
+        >
+          <TableHead>
+            <TableRow>
+              <TableCell rowSpan={2} sx={{ ...comparisonStickyPlayerCellSx, top: 0, zIndex: 4, fontWeight: 900 }}>
+                Participant
+              </TableCell>
+              {selectedRounds.map((round) => (
+                <TableCell
+                  key={round}
+                  align="center"
+                  colSpan={state.picks[0]?.knockout[round].length ?? 0}
+                  sx={{ bgcolor: "grey.100", borderLeft: "1px solid", borderLeftColor: "divider", fontWeight: 900 }}
+                >
+                  {BRACKET_ROUND_LABELS[round]}
+                </TableCell>
+              ))}
+            </TableRow>
+            <TableRow>
+              {selectedRounds.flatMap((round) =>
+                (state.picks[0]?.knockout[round] ?? []).map((match, index) => (
+                  <TableCell
+                    key={`${round}-${match.slotId}`}
+                    align="center"
+                    sx={{ minWidth: COMPARISON_PICK_COLUMN_WIDTH, whiteSpace: "nowrap", ...(index === 0 ? { borderLeft: "1px solid", borderLeftColor: "divider" } : {}) }}
+                  >
+                    Match {index + 1}
+                  </TableCell>
+                )),
+              )}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {state.members.map((member) => {
+              const pick = picksByMember.get(member.id);
+              return (
+                <TableRow key={member.id} hover sx={{ height: COMPARISON_BODY_ROW_HEIGHT }}>
+                  <TableCell component="th" scope="row" title={member.displayName} sx={{ ...comparisonStickyPlayerCellSx, fontWeight: 800 }}>
+                    {member.displayName}
+                  </TableCell>
+                  {selectedRounds.flatMap((round) =>
+                    (pick?.knockout[round] ?? []).map((match, index) => (
+                      <TableCell
+                        key={`${round}-${match.slotId}`}
+                        sx={{ minWidth: COMPARISON_PICK_COLUMN_WIDTH, ...(index === 0 ? { borderLeft: "1px solid", borderLeftColor: "divider" } : {}) }}
+                      >
+                        <TeamLabel teamMap={teamMap} teamId={match.winnerId} />
+                      </TableCell>
+                    )),
+                  )}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Stack>
   );
 }
 
@@ -890,7 +719,7 @@ function ScheduleView({ state, teamMap }: { state: AppState; teamMap: Map<string
           pb: 1.5,
         }}
       >
-        <Typography variant="h3" sx={{ alignSelf: { sm: "center" } }}>
+        <Typography variant="h3" sx={{ alignSelf: { sm: "center" }, display: { xs: "none", sm: "block" } }}>
           Matches
         </Typography>
         <ToggleButtonGroup
@@ -910,9 +739,12 @@ function ScheduleView({ state, teamMap }: { state: AppState; teamMap: Map<string
               border: 0,
               borderRadius: 1,
               color: "text.secondary",
+              fontSize: "0.7rem",
               fontWeight: 800,
-              minHeight: 34,
-              px: { xs: 1, sm: 1.5 },
+              minHeight: 26,
+              minWidth: 0,
+              px: 0.75,
+              py: 0.25,
               textTransform: "none",
               whiteSpace: "nowrap",
               "&.Mui-selected": {
@@ -940,121 +772,59 @@ function ScheduleView({ state, teamMap }: { state: AppState; teamMap: Map<string
   );
 }
 
-function Compare({ state, teamMap }: { state: AppState; teamMap: Map<string, Team> }) {
-  const [memberA, setMemberA] = useState(state.members[0]?.id ?? "");
-  const [memberB, setMemberB] = useState(state.members[1]?.id ?? state.members[0]?.id ?? "");
-  const pickA = state.picks.find((pick) => pick.memberId === memberA);
-  const pickB = state.picks.find((pick) => pick.memberId === memberB);
-  if (!pickA || !pickB) return null;
-
-  const rows: Array<{ label: string; a: string; b: string; match: boolean }> = [
-    { label: "Champion", a: teamLabelText(teamMap, pickA.championPick), b: teamLabelText(teamMap, pickB.championPick), match: pickA.championPick === pickB.championPick },
-    { label: "Finalists", a: teamListText(teamMap, finalistIds(pickA)), b: teamListText(teamMap, finalistIds(pickB)), match: sameSet(finalistIds(pickA), finalistIds(pickB)) },
-    { label: "Semifinalists", a: teamListText(teamMap, roundTeamIds(pickA, "SF")), b: teamListText(teamMap, roundTeamIds(pickB, "SF")), match: sameSet(roundTeamIds(pickA, "SF"), roundTeamIds(pickB, "SF")) },
-    { label: "Quarterfinalists", a: teamListText(teamMap, roundTeamIds(pickA, "QF")), b: teamListText(teamMap, roundTeamIds(pickB, "QF")), match: sameSet(roundTeamIds(pickA, "QF"), roundTeamIds(pickB, "QF")) },
-    {
-      label: "Third-place advancers",
-      a: teamListText(teamMap, pickA.thirdPlaceAdvancers),
-      b: teamListText(teamMap, pickB.thirdPlaceAdvancers),
-      match: sameSet(pickA.thirdPlaceAdvancers, pickB.thirdPlaceAdvancers),
-    },
-    ...GROUP_IDS.map((group) => {
-      const a = pickA.groups[group][0]?.teamId;
-      const b = pickB.groups[group][0]?.teamId;
-      return { label: `Group ${group} winner`, a: teamLabelText(teamMap, a), b: teamLabelText(teamMap, b), match: a === b };
-    }),
-    ...ROUND_IDS.flatMap((round) =>
-      pickA.knockout[round].map((match, index) => {
-        const other = pickB.knockout[round][index];
-        return {
-          label: `${round} match ${index + 1}`,
-          a: teamLabelText(teamMap, match.winnerId),
-          b: teamLabelText(teamMap, other?.winnerId),
-          match: match.winnerId === other?.winnerId,
-        };
-      }),
-    ),
-  ];
-  const matches = rows.filter((row) => row.match).length;
-
-  return (
-    <Stack spacing={2}>
-      <Paper
-        variant="outlined"
-        sx={{
-          alignItems: { sm: "center" },
-          bgcolor: "grey.50",
-          display: "flex",
-          flexDirection: { xs: "column", sm: "row" },
-          gap: 1.5,
-          p: { xs: 2, sm: 2.5 },
-        }}
-      >
-        <PickSelector members={state.members} selectedMemberId={memberA} onChange={setMemberA} />
-        <CompareArrowsIcon color="action" sx={{ alignSelf: "center", display: { xs: "none", sm: "block" } }} />
-        <PickSelector members={state.members} selectedMemberId={memberB} onChange={setMemberB} />
-        <Chip label={`${matches} of ${rows.length} picks match`} color="primary" sx={{ ml: { sm: "auto" } }} />
-      </Paper>
-      <MobileScrollHint>Scroll horizontally to inspect the full comparison</MobileScrollHint>
-      <TableContainer component={Paper} variant="outlined" sx={{ overflowX: "auto" }}>
-        <Table size="small" sx={{ minWidth: 720 }}>
-          <TableHead>
-            <TableRow>
-              <TableCell>Pick</TableCell>
-              <TableCell>Player A</TableCell>
-              <TableCell>Player B</TableCell>
-              <TableCell>Match</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.label}>
-                <TableCell>{row.label}</TableCell>
-                <TableCell>{row.a}</TableCell>
-                <TableCell>{row.b}</TableCell>
-                <TableCell>
-                  <Chip size="small" label={row.match ? "Yes" : "No"} color={row.match ? "success" : "default"} />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Stack>
-  );
-}
-
 function Leaderboard({ state, teamMap }: { state: AppState; teamMap: Map<string, Team> }) {
+  const desktopOnlyCellSx = { display: { xs: "none", sm: "table-cell" } } as const;
+  const rankCellSx = {
+    width: { xs: 58, sm: "5%" },
+    maxWidth: { xs: 58, sm: "5%" },
+    whiteSpace: "nowrap",
+  } as const;
+  const participantCellSx = {
+    width: { xs: 162, sm: "24%" },
+    maxWidth: { xs: 162, sm: "24%" },
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  } as const;
+  const totalCellSx = {
+    width: { xs: 68, sm: "13%" },
+    maxWidth: { xs: 68, sm: "13%" },
+    whiteSpace: "nowrap",
+  } as const;
+
   return (
     <Stack spacing={1}>
-      <MobileScrollHint>Scroll horizontally to inspect the full leaderboard</MobileScrollHint>
-      <TableContainer component={Paper} variant="outlined" sx={{ overflowX: "auto" }}>
-        <Table size="small" sx={{ minWidth: 900 }}>
+      <TableContainer component={Paper} variant="outlined" sx={{ overflowX: { xs: "hidden", sm: "auto" } }}>
+        <Table
+          size="small"
+          sx={{
+            minWidth: { xs: 0, sm: 720 },
+            tableLayout: "fixed",
+            width: "100%",
+            "& .MuiTableCell-root": { px: { xs: 0.75, sm: 2 } },
+          }}
+        >
           <TableHead>
             <TableRow>
-              <TableCell>Rank</TableCell>
-              <TableCell>Member</TableCell>
-              <TableCell>Total</TableCell>
-              <TableCell>Groups</TableCell>
-              <TableCell>Third</TableCell>
-              <TableCell>Knockout</TableCell>
-              <TableCell>Champion Bonus</TableCell>
-              <TableCell>Champion Pick</TableCell>
+              <TableCell align="center" sx={rankCellSx}>Rank</TableCell>
+              <TableCell sx={participantCellSx}>Participant</TableCell>
+              <TableCell align="center" sx={{ width: { sm: "20%" } }}>Champion</TableCell>
+              <TableCell align="center" sx={{ ...desktopOnlyCellSx, width: { sm: "18%" } }}>Group</TableCell>
+              <TableCell align="center" sx={{ ...desktopOnlyCellSx, width: { sm: "20%" } }}>Knockout</TableCell>
+              <TableCell align="center" sx={totalCellSx}>Total</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {state.leaderboard.map((entry) => (
               <TableRow key={entry.memberId}>
-                <TableCell sx={{ fontWeight: 900 }}>{entry.rank}</TableCell>
-                <TableCell>{entry.displayName}</TableCell>
-                <TableCell sx={{ color: "primary.main", fontWeight: 900 }}>{entry.totalPoints}</TableCell>
-                <TableCell>{entry.groupPoints}</TableCell>
-                <TableCell>{entry.thirdPlacePoints}</TableCell>
-                <TableCell>{entry.knockoutPoints}</TableCell>
-                <TableCell>{entry.championBonus}</TableCell>
-                <TableCell>
+                <TableCell align="center" sx={{ ...rankCellSx, fontWeight: 900 }}>{entry.rank}</TableCell>
+                <TableCell sx={participantCellSx}>{entry.displayName}</TableCell>
+                <TableCell align="center" sx={{ width: { sm: "20%" }, "& > .MuiStack-root": { justifyContent: "center" } }}>
                   <TeamLabel teamMap={teamMap} teamId={entry.championPick} />
                 </TableCell>
+                <TableCell align="center" sx={{ ...desktopOnlyCellSx, width: { sm: "18%" } }}>{entry.groupPoints}</TableCell>
+                <TableCell align="center" sx={{ ...desktopOnlyCellSx, width: { sm: "20%" } }}>{entry.knockoutPoints}</TableCell>
+                <TableCell align="center" sx={{ ...totalCellSx, color: "primary.main", fontWeight: 900 }}>{entry.totalPoints}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -1064,13 +834,14 @@ function Leaderboard({ state, teamMap }: { state: AppState; teamMap: Map<string,
   );
 }
 
-export function Dashboard({ initialData }: { initialData: StaticAppData }) {
-  const [tab, setTab] = useState(0);
-  const [selectedMemberId, setSelectedMemberId] = useState(initialData.members[0]?.id ?? "");
+export function Dashboard({ initialData, initialTab }: { initialData: StaticAppData; initialTab?: string }) {
+  const [tab, setTab] = useState(() => dashboardTabIndex(initialTab));
+  const [scoringTooltipOpen, setScoringTooltipOpen] = useState(false);
+  const scoringTooltipUsesClick = useMediaQuery("(hover: none), (pointer: coarse)");
   const canonicalTeamIds = useMemo(() => new Set(initialData.teams.map((team) => team.id)), [initialData.teams]);
   const live = useEspnLiveMatches(canonicalTeamIds);
   const tournamentResults = useMemo(
-    () => (tab === 6 ? buildTournamentResults(initialData, live.matches) : null),
+    () => (tab <= 1 ? buildTournamentResults(initialData, live.matches) : null),
     [initialData, live.matches, tab],
   );
   const state = useMemo<AppState>(() => ({
@@ -1092,7 +863,31 @@ export function Dashboard({ initialData }: { initialData: StaticAppData }) {
     leaderboard: tournamentResults?.leaderboard ?? [],
   }), [initialData, live, tournamentResults]);
   const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams]);
-  const selectedPick = state.picks.find((pick) => pick.memberId === selectedMemberId) ?? state.picks[0];
+
+  useEffect(() => {
+    if (initialTab) return;
+    try {
+      const savedTab = window.localStorage.getItem(LAST_DASHBOARD_TAB_STORAGE_KEY);
+      if (savedTab) {
+        setTab(dashboardTabIndex(savedTab));
+        document.cookie = `${LAST_DASHBOARD_TAB_COOKIE_KEY}=${encodeURIComponent(savedTab)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+      }
+    } catch {
+      // Storage can be unavailable in privacy-restricted browser contexts.
+    }
+  }, [initialTab]);
+
+  const selectTab = (nextTab: number) => {
+    setScoringTooltipOpen(false);
+    setTab(nextTab);
+    try {
+      const selectedTab = DASHBOARD_TAB_LABELS[nextTab];
+      window.localStorage.setItem(LAST_DASHBOARD_TAB_STORAGE_KEY, selectedTab);
+      document.cookie = `${LAST_DASHBOARD_TAB_COOKIE_KEY}=${encodeURIComponent(selectedTab)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    } catch {
+      // The tab still works when browser storage is unavailable.
+    }
+  };
 
   return (
     <Box>
@@ -1128,8 +923,14 @@ export function Dashboard({ initialData }: { initialData: StaticAppData }) {
         </Container>
         <Box sx={{ borderTop: { md: "1px solid #d8e0eb" } }}>
           <Container maxWidth="xl">
-            <Tabs value={tab} onChange={(_, value: number) => setTab(value)} variant="scrollable" scrollButtons="auto" aria-label="Dashboard sections">
-              {TAB_LABELS.map((label) => (
+            <Tabs
+              value={tab}
+              onChange={(_, value: number) => selectTab(value)}
+              variant="scrollable"
+              scrollButtons="auto"
+              aria-label="Dashboard sections"
+            >
+              {DASHBOARD_TAB_LABELS.map((label) => (
                 <Tab key={label} label={label} />
               ))}
             </Tabs>
@@ -1150,28 +951,57 @@ export function Dashboard({ initialData }: { initialData: StaticAppData }) {
           spacing={2}
           alignItems={{ sm: "flex-end" }}
           justifyContent="space-between"
-          sx={{ mb: { xs: 2, md: 3 } }}
+          sx={{ display: { xs: "none", sm: "flex" }, mb: { sm: 2, md: 3 } }}
         >
           <Box>
             <Typography component="h2" variant="h2">
-              {TAB_LABELS[tab]}
+              {DASHBOARD_TAB_LABELS[tab]}
             </Typography>
-            <Typography color="text.secondary" variant="body2" sx={{ mt: 0.5 }}>
-              {TAB_DESCRIPTIONS[tab]}
-            </Typography>
+            <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mt: 0.5 }}>
+              <Typography color="text.secondary" variant="body2">
+                {TAB_DESCRIPTIONS[tab]}
+              </Typography>
+              {tab === 0 ? (
+                <Tooltip
+                  arrow
+                  placement="bottom-start"
+                  open={scoringTooltipUsesClick ? scoringTooltipOpen : undefined}
+                  onClose={() => setScoringTooltipOpen(false)}
+                  disableFocusListener={scoringTooltipUsesClick}
+                  disableHoverListener={scoringTooltipUsesClick}
+                  disableTouchListener={scoringTooltipUsesClick}
+                  title={(
+                    <Box sx={{ maxWidth: 340, py: 0.5 }}>
+                      <Typography variant="caption" sx={{ display: "block", fontWeight: 900 }}>Group stage</Typography>
+                      <Typography variant="caption" sx={{ display: "block" }}>
+                        {state.scoring.rules.groupExactPosition} points per exact current position, plus {state.scoring.rules.groupExactBonus} points when the entire current group is correct.
+                      </Typography>
+                      <Typography variant="caption" sx={{ display: "block", fontWeight: 900, mt: 0.75 }}>Knockouts</Typography>
+                      <Typography variant="caption" sx={{ display: "block" }}>
+                        Round of 16: {state.scoring.rules.knockoutAdvancementByRound.R32} · Quarterfinals: {state.scoring.rules.knockoutAdvancementByRound.R16} · Semifinals: {state.scoring.rules.knockoutAdvancementByRound.QF} · Final: {state.scoring.rules.knockoutAdvancementByRound.SF} · Champion: {state.scoring.rules.knockoutAdvancementByRound.F}
+                      </Typography>
+                    </Box>
+                  )}
+                >
+                  <IconButton
+                    size="small"
+                    aria-label="Show scoring rules"
+                    aria-expanded={scoringTooltipUsesClick ? scoringTooltipOpen : undefined}
+                    onClick={scoringTooltipUsesClick ? () => setScoringTooltipOpen((open) => !open) : undefined}
+                    sx={{ p: 0.25, color: "text.secondary" }}
+                  >
+                    <InfoOutlinedIcon sx={{ fontSize: 18 }} />
+                  </IconButton>
+                </Tooltip>
+              ) : null}
+            </Stack>
           </Box>
-          {[2, 3].includes(tab) && selectedPick ? (
-            <PickSelector members={state.members} selectedMemberId={selectedPick.memberId} onChange={setSelectedMemberId} />
-          ) : null}
         </Stack>
 
-        {tab === 0 ? <Overview state={state} teamMap={teamMap} /> : null}
-        {tab === 1 ? <Participants state={state} teamMap={teamMap} onViewBracket={(memberId) => { setSelectedMemberId(memberId); setTab(3); }} /> : null}
-        {tab === 2 && selectedPick ? <GroupsView state={state} pick={selectedPick} teamMap={teamMap} /> : null}
-        {tab === 3 && selectedPick ? <KnockoutView pick={selectedPick} teamMap={teamMap} /> : null}
-        {tab === 4 ? <ScheduleView state={state} teamMap={teamMap} /> : null}
-        {tab === 5 ? <Compare state={state} teamMap={teamMap} /> : null}
-        {tab === 6 ? <Leaderboard state={state} teamMap={teamMap} /> : null}
+        {tab === 0 ? <Leaderboard state={state} teamMap={teamMap} /> : null}
+        {tab === 1 ? <GroupsView state={state} teamMap={teamMap} /> : null}
+        {tab === 2 ? <KnockoutView state={state} teamMap={teamMap} /> : null}
+        {tab === 3 ? <ScheduleView state={state} teamMap={teamMap} /> : null}
       </Container>
     </Box>
   );

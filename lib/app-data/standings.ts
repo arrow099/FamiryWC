@@ -31,7 +31,12 @@ export function buildGroupStandings(matches: Match[]): AppState["groups"] {
   };
 
   for (const group of GROUP_IDS) {
-    const groupMatches = matches.filter((match) => match.group === group && match.status === "post" && match.homeTeamId && match.awayTeamId);
+    const groupMatches = matches.filter((match) => (
+      match.group === group
+      && (match.status === "in" || match.status === "post")
+      && match.homeTeamId
+      && match.awayTeamId
+    ));
     if (groupMatches.length === 0) continue;
 
     const standings = new Map<string, ReturnType<typeof emptyStanding>>();

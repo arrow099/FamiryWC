@@ -375,28 +375,31 @@ unknown
 
 Scoring should be versioned.
 
-Active v1 rules:
+Active v2 rules:
 
 ```json
 {
-  "scoringVersion": 1,
+  "scoringVersion": 2,
   "rules": {
-    "groupExactPosition": 2,
-    "groupQualified": 1,
-    "thirdPlaceAdvanced": 2,
-    "knockoutWinnerByRound": {
-      "R32": 2,
-      "R16": 4,
-      "QF": 6,
-      "SF": 8,
-      "F": 12
-    },
-    "champion": 10
+    "groupExactPosition": 50,
+    "groupExactBonus": 30,
+    "knockoutAdvancementByRound": {
+      "R32": 20,
+      "R16": 30,
+      "QF": 40,
+      "SF": 75,
+      "F": 100
+    }
   }
 }
 ```
 
 Point values live in `data/scoring_rules.json`.
+Group points use the current standings, so they remain provisional until the group
+stage is complete. The exact-group bonus applies whenever all four current positions
+match the prediction.
+The knockout keys identify the match whose winner reaches the scored stage: an
+`R32` winner reaches the Round of 16, while an `F` winner is the champion.
 
 ## Leaderboard Entry
 
@@ -407,14 +410,18 @@ Point values live in `data/scoring_rules.json`.
   "displayName": "Leppy27",
   "totalPoints": 0,
   "groupPoints": 0,
-  "thirdPlacePoints": 0,
   "knockoutPoints": 0,
-  "championBonus": 0,
+  "knockoutPointsByRound": {
+    "R32": 0,
+    "R16": 0,
+    "QF": 0,
+    "SF": 0,
+    "F": 0
+  },
   "championPick": "team_bra",
   "possiblePointsRemaining": null,
   "correctPicks": {
     "groups": 0,
-    "thirdPlace": 0,
     "knockout": 0
   }
 }

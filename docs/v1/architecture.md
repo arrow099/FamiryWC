@@ -55,7 +55,7 @@ A successful response replaces the normalized match snapshot atomically. A faile
 ## Tab-Level Work
 
 - Overview and Schedule read normalized matches directly.
-- Participants, Groups, Knockout, and Compare use stable picks and do not aggregate live results.
+- Groups, Knockout, and Compare use stable picks and do not aggregate live results.
 - Leaderboard invokes group standings, actual bracket, and scoring derivation through a memoized calculation.
 - Switching away from Leaderboard removes the derived result from the dashboard state; returning recomputes only when required.
 

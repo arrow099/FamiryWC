@@ -101,10 +101,8 @@ export type ScoringRules = {
   scoringVersion: number;
   rules: {
     groupExactPosition: number;
-    groupQualified: number;
-    thirdPlaceAdvanced: number;
-    knockoutWinnerByRound: Record<RoundId, number>;
-    champion: number;
+    groupExactBonus: number;
+    knockoutAdvancementByRound: Record<RoundId, number>;
   };
 };
 
@@ -114,14 +112,12 @@ export type LeaderboardEntry = {
   displayName: string;
   totalPoints: number;
   groupPoints: number;
-  thirdPlacePoints: number;
   knockoutPoints: number;
-  championBonus: number;
+  knockoutPointsByRound: Record<RoundId, number>;
   championPick: string | null;
   possiblePointsRemaining: number | null;
   correctPicks: {
     groups: number;
-    thirdPlace: number;
     knockout: number;
   };
 };

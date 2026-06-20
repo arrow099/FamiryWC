@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
+  const now = Date.now();
   await page.route("https://site.api.espn.com/**", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -12,7 +13,7 @@ test.beforeEach(async ({ page }) => {
             competitions: [
               {
                 id: "401000001",
-                date: "2026-06-19T20:00:00Z",
+                date: new Date(now + 60 * 60 * 1000).toISOString(),
                 altGameNote: "FIFA World Cup, Group A",
                 status: { type: { state: "pre", shortDetail: "Scheduled" } },
                 competitors: [
@@ -29,7 +30,7 @@ test.beforeEach(async ({ page }) => {
             competitions: [
               {
                 id: "401000002",
-                date: "2026-06-19T22:00:00Z",
+                date: new Date(now).toISOString(),
                 altGameNote: "FIFA World Cup, Group A",
                 status: { type: { state: "in", shortDetail: "In Progress" }, displayClock: "45:00" },
                 competitors: [
@@ -45,7 +46,7 @@ test.beforeEach(async ({ page }) => {
             competitions: [
               {
                 id: "401000003",
-                date: "2026-06-20T00:00:00Z",
+                date: new Date(now + 2 * 60 * 60 * 1000).toISOString(),
                 altGameNote: "FIFA World Cup, Group A",
                 status: { type: { state: "pre", shortDetail: "Scheduled" } },
                 competitors: [
@@ -90,49 +91,91 @@ test("renders dashboard and core tabs", async ({ page, isMobile }) => {
   expect(statusBox).not.toBeNull();
   expect(cardBox!.x + cardBox!.width - statusBox!.x - statusBox!.width).toBeLessThanOrEqual(10);
   await expect(page.getByLabel("Today's matches").getByText(/LIVE 45'/)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Top Third-Place Picks" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Top Third-Place Picks" }).locator("..").getByTitle(/ flag$/).first()).toBeVisible();
-
-  await page.getByRole("tab", { name: "Participants" }).click();
-  await expect(page.getByRole("cell", { name: "Leppy27" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "BRA" }).first()).toBeVisible();
-  await expect(page.getByTitle("BRA flag").first()).toBeVisible();
-  await expect(page.getByRole("columnheader", { name: "Champion" })).toHaveCSS("text-align", "center");
-  await expect(page.getByRole("columnheader", { name: "Bracket" })).toHaveCSS("text-align", "center");
-  await expect(page.getByRole("cell", { name: "BRA" }).first()).toHaveCSS("text-align", "center");
-  await expect(page.getByRole("cell", { name: "View" }).first()).toHaveCSS("text-align", "center");
-  const participantsTable = page.locator(".MuiTableContainer-root");
-  const tableDimensions = await participantsTable.evaluate((element) => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(tableDimensions.scrollWidth).toBeLessThanOrEqual(tableDimensions.clientWidth);
+  const leaderboardHeading = page.getByRole("heading", { name: "Leaderboard", exact: true });
+  if (isMobile) {
+    await expect(leaderboardHeading).toHaveCount(0);
+  } else {
+    await expect(leaderboardHeading).toBeVisible();
+  }
+  await expect(page.getByRole("tab", { name: "Overview" })).toHaveCount(0);
 
   await page.getByRole("tab", { name: "Groups" }).click();
-  const groupACard = page.getByRole("heading", { name: "Group A" }).locator("..");
-  await expect(groupACard.getByText("MEX", { exact: true })).toBeVisible();
-  await expect(groupACard.getByTitle("MEX flag")).toBeVisible();
-
-  for (const [tab, hint] of [
-    ["Knockout", "Scroll horizontally to inspect the full bracket"],
-    ["Compare", "Scroll horizontally to inspect the full comparison"],
-  ] as const) {
-    await page.getByRole("tab", { name: tab }).click();
-    const scrollHint = page.getByText(hint, { exact: true });
-    if (isMobile) {
-      await expect(scrollHint).toBeVisible();
-    } else {
-      await expect(scrollHint).toBeHidden();
-    }
-  }
-  const compareArrow = page.getByTestId("CompareArrowsIcon");
+  const groupFilterHeading = page.getByRole("heading", { name: "Group Filter" });
   if (isMobile) {
-    await expect(compareArrow).toBeHidden();
+    await expect(groupFilterHeading).toHaveCount(0);
   } else {
-    await expect(compareArrow).toBeVisible();
+    await expect(groupFilterHeading).toBeVisible();
+  }
+  await expect(page.getByRole("columnheader", { name: "Group A" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Pos 1" })).toHaveCount(12);
+  await expect(page.getByRole("rowheader", { name: "Leppy27" })).toBeVisible();
+  const leppyRow = page.getByRole("row").filter({ has: page.getByRole("rowheader", { name: "Leppy27" }) });
+  await expect(leppyRow.getByText("MEX", { exact: true }).first()).toBeVisible();
+  await expect(leppyRow.getByTitle("MEX flag").first()).toBeVisible();
+  const correctMexicoPick = leppyRow.locator('[data-correct-position="true"]').filter({ hasText: "MEX" });
+  await expect(correctMexicoPick).toHaveCount(1);
+  await expect(correctMexicoPick).toHaveCSS("border-top-color", "rgb(19, 138, 75)");
+  const groupsScrollHint = page.getByText("Scroll horizontally to compare all group picks", { exact: true });
+  if (isMobile) {
+    await expect(groupsScrollHint).toBeVisible();
+  } else {
+    await expect(groupsScrollHint).toBeHidden();
+  }
+  const groupsFilter = page.getByRole("group", { name: "Group filter" });
+  if (isMobile) {
+    const [filterBox, lastGroupButtonBox] = await Promise.all([
+      groupsFilter.boundingBox(),
+      groupsFilter.getByRole("button", { name: "Show Group L" }).boundingBox(),
+    ]);
+    expect(filterBox).not.toBeNull();
+    expect(lastGroupButtonBox).not.toBeNull();
+    expect(filterBox!.x + filterBox!.width - lastGroupButtonBox!.x - lastGroupButtonBox!.width).toBeLessThanOrEqual(1);
+  }
+  await expect(groupsFilter.getByRole("button", { name: "Show all groups" })).toHaveAttribute("aria-pressed", "true");
+  await groupsFilter.getByRole("button", { name: "Show Group A" }).click();
+  await expect(groupsFilter.getByRole("button", { name: "Show all groups" })).toHaveAttribute("aria-pressed", "false");
+  await expect(groupsFilter.getByRole("button", { name: "Show Group A" })).toHaveAttribute("aria-pressed", "true");
+  await groupsFilter.getByRole("button", { name: "Show Group B" }).click();
+  await expect(page.getByRole("columnheader", { name: "Group A" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Group B" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Group C" })).toHaveCount(0);
+  await expect(page.getByRole("columnheader", { name: "Pos 1" })).toHaveCount(2);
+  await groupsFilter.getByRole("button", { name: "Show all groups" }).click();
+  await expect(groupsFilter.getByRole("button", { name: "Show all groups" })).toHaveAttribute("aria-pressed", "true");
+  await expect(groupsFilter.getByRole("button", { name: "Show Group A" })).toHaveAttribute("aria-pressed", "false");
+  await expect(groupsFilter.getByRole("button", { name: "Show Group B" })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("columnheader", { name: "Pos 1" })).toHaveCount(12);
+
+  await page.getByRole("tab", { name: "Knockout" }).click();
+  const roundFilterHeading = page.getByRole("heading", { name: "Round Filter" });
+  if (isMobile) {
+    await expect(roundFilterHeading).toHaveCount(0);
+  } else {
+    await expect(roundFilterHeading).toBeVisible();
+  }
+  await expect(page.getByRole("columnheader", { name: "Round of 32" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Match 1", exact: true })).toHaveCount(5);
+  await expect(page.getByRole("rowheader", { name: "Leppy27" })).toBeVisible();
+  const roundFilter = page.getByRole("group", { name: "Round filter" });
+  await expect(roundFilter.getByRole("button", { name: "Show all rounds" })).toHaveAttribute("aria-pressed", "true");
+  await roundFilter.getByRole("button", { name: "Show Final" }).click();
+  await expect(page.getByRole("columnheader", { name: "Final" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Round of 32" })).toHaveCount(0);
+  const bracketScrollHint = page.getByText("Scroll horizontally to compare all knockout picks", { exact: true });
+  if (isMobile) {
+    await expect(bracketScrollHint).toBeVisible();
+  } else {
+    await expect(bracketScrollHint).toBeHidden();
   }
 
   await page.getByRole("tab", { name: "Schedule" }).click();
+  const scheduleFilterHeading = page.getByRole("heading", { name: "Matches" });
+  if (isMobile) {
+    await expect(scheduleFilterHeading).toHaveCount(0);
+  } else {
+    await expect(scheduleFilterHeading).toBeVisible();
+  }
+  await expect(page.getByRole("group", { name: "Schedule match filter" }).getByRole("button").first()).toHaveCSS("min-height", "26px");
   for (const header of ["Kickoff", "Match", "Score"]) {
     await expect(page.locator("th:visible", { hasText: new RegExp(`^${header}$`) }).first()).toBeVisible();
   }
@@ -146,21 +189,40 @@ test("renders dashboard and core tabs", async ({ page, isMobile }) => {
   }
 
   await page.getByRole("tab", { name: "Leaderboard" }).click();
-  const leaderboardScrollHint = page.getByText("Scroll horizontally to inspect the full leaderboard", { exact: true });
+  const scoringRulesButton = page.getByRole("button", { name: "Show scoring rules" });
   if (isMobile) {
-    await expect(leaderboardScrollHint).toBeVisible();
+    await expect(scoringRulesButton).toHaveCount(0);
   } else {
-    await expect(leaderboardScrollHint).toBeHidden();
+    await scoringRulesButton.hover();
+    await expect(page.getByRole("tooltip")).toContainText("50 points per exact current position");
   }
   await expect(page.getByRole("columnheader", { name: "Total" })).toBeVisible();
+  expect(await page.getByRole("columnheader").allTextContents()).toEqual(
+    isMobile
+      ? ["Rank", "Participant", "Champion", "Total"]
+      : ["Rank", "Participant", "Champion", "Group", "Knockout", "Total"],
+  );
+  if (isMobile) {
+    const leaderboardTable = page.locator(".MuiTableContainer-root");
+    const dimensions = await leaderboardTable.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+  }
 });
 
-test("keeps every dashboard section within the page viewport", async ({ page }) => {
+test("keeps every dashboard section within the page viewport", async ({ page, isMobile }) => {
   await page.goto("/");
 
-  for (const tab of ["Overview", "Participants", "Groups", "Knockout", "Schedule", "Compare", "Leaderboard"]) {
+  for (const tab of ["Leaderboard", "Groups", "Knockout", "Schedule"]) {
     await page.getByRole("tab", { name: tab }).click();
-    await expect(page.getByRole("heading", { name: tab, exact: true })).toBeVisible();
+    const tabHeading = page.getByRole("heading", { name: tab, exact: true });
+    if (isMobile) {
+      await expect(tabHeading).toHaveCount(0);
+    } else {
+      await expect(tabHeading).toBeVisible();
+    }
 
     const dimensions = await page.evaluate(() => ({
       pageWidth: document.documentElement.scrollWidth,
