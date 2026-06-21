@@ -29,10 +29,11 @@ import {
   useMediaQuery,
 } from "@mui/material";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import { MatchDetailsDialog } from "@/components/MatchDetailsDialog";
 import { useEspnLiveMatches } from "@/hooks/useEspnLiveMatches";
 import { buildTournamentResults, emptyActualBracket, emptyGroups } from "@/lib/app-data/deriveTournamentResults";
 import { selectMobileHeaderMatch } from "@/lib/app-data/headerMatches";
-import { flagForTeam, formatTeamLabel } from "@/lib/app-data/teamDisplay";
+import { flagForTeam } from "@/lib/app-data/teamDisplay";
 import {
   DASHBOARD_TAB_LABELS,
   LAST_DASHBOARD_TAB_COOKIE_KEY,
@@ -65,12 +66,6 @@ const SCHEDULE_FILTERS: Array<{ label: string; value: ScheduleFilter }> = [
   { label: "Upcoming", value: "upcoming" },
   { label: "Past", value: "past" },
 ];
-
-function teamLabelText(teamMap: Map<string, Team>, teamId: string | null | undefined): string {
-  if (!teamId) return "-";
-  const team = teamMap.get(teamId);
-  return team ? formatTeamLabel(team) : teamId;
-}
 
 function TeamLabel({ teamMap, teamId }: { teamMap: Map<string, Team>; teamId: string | null | undefined }) {
   if (!teamId) return "-";
@@ -208,7 +203,7 @@ function matchStatusChip(match: Match): { color: MatchStatusChipColor; label: st
   return { color: "default", label: match.status === "pre" ? formatMatchTime(match.kickoffAt) : match.statusText || match.status };
 }
 
-function TodayMatches({ state, teamMap }: { state: AppState; teamMap: Map<string, Team> }) {
+function TodayMatches({ state, teamMap, onSelectMatch }: { state: AppState; teamMap: Map<string, Team>; onSelectMatch: (match: Match) => void }) {
   const todayKey = easternDateKey(new Date());
   const todaysMatches = state.matches
     .filter((match) => match.kickoffAt && easternDateKey(match.kickoffAt) === todayKey)
@@ -250,6 +245,16 @@ function TodayMatches({ state, teamMap }: { state: AppState; teamMap: Map<string
             key={match.id}
             data-testid="header-match-card"
             variant="outlined"
+            role="button"
+            tabIndex={0}
+            aria-label={`Open ${match.homeTeamName ?? "home team"} vs ${match.awayTeamName ?? "away team"} match details`}
+            onClick={() => onSelectMatch(match)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelectMatch(match);
+              }
+            }}
             sx={{
               alignItems: "center",
               bgcolor: isLive ? "success.light" : "background.paper",
@@ -262,6 +267,8 @@ function TodayMatches({ state, teamMap }: { state: AppState; teamMap: Map<string
               minWidth: 250,
               px: 0.75,
               py: 0.25,
+              cursor: "pointer",
+              "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
             }}
           >
             <Chip size="small" label={match.group ?? match.round} sx={{ height: 17, fontSize: "0.62rem", fontWeight: 900, px: 0 }} />
@@ -332,9 +339,20 @@ const comparisonTableSx = {
   },
 } as const;
 
+function membersInLeaderboardOrder(state: AppState): AppState["members"] {
+  const membersById = new Map(state.members.map((member) => [member.id, member]));
+  const rankedMembers = state.leaderboard.flatMap((entry) => {
+    const member = membersById.get(entry.memberId);
+    return member ? [member] : [];
+  });
+  const rankedMemberIds = new Set(rankedMembers.map((member) => member.id));
+  return [...rankedMembers, ...state.members.filter((member) => !rankedMemberIds.has(member.id))];
+}
+
 function GroupsView({ state, teamMap }: { state: AppState; teamMap: Map<string, Team> }) {
   const [selectedGroups, setSelectedGroups] = useState<GroupId[]>([...GROUP_IDS]);
   const picksByMember = new Map(state.picks.map((pick) => [pick.memberId, pick]));
+  const rankedMembers = membersInLeaderboardOrder(state);
 
   return (
     <Stack spacing={{ xs: 1.5, md: 2 }}>
@@ -443,7 +461,7 @@ function GroupsView({ state, teamMap }: { state: AppState; teamMap: Map<string, 
             </TableRow>
           </TableHead>
           <TableBody>
-            {state.members.map((member) => {
+            {rankedMembers.map((member) => {
               const pick = picksByMember.get(member.id);
               return (
                 <TableRow key={member.id} hover sx={{ height: COMPARISON_BODY_ROW_HEIGHT }}>
@@ -509,7 +527,7 @@ function scheduleSections(matches: Match[], filter: ScheduleFilter): Array<{ tit
   return sections.filter((section) => section.matches.length > 0 && visibleSectionTitles[filter].has(section.title));
 }
 
-function ScheduleTable({ title, matches, teamMap }: { title: string; matches: Match[]; teamMap: Map<string, Team> }) {
+function ScheduleTable({ title, matches, teamMap, onSelectMatch }: { title: string; matches: Match[]; teamMap: Map<string, Team>; onSelectMatch: (match: Match) => void }) {
   return (
     <Card>
       <CardContent>
@@ -532,7 +550,20 @@ function ScheduleTable({ title, matches, teamMap }: { title: string; matches: Ma
               {matches.map((match) => {
                 const statusChip = matchStatusChip(match);
                 return (
-                  <TableRow key={match.id}>
+                  <TableRow
+                    key={match.id}
+                    hover
+                    tabIndex={0}
+                    aria-label={`Open ${match.homeTeamName ?? "home team"} vs ${match.awayTeamName ?? "away team"} match details`}
+                    onClick={() => onSelectMatch(match)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onSelectMatch(match);
+                      }
+                    }}
+                    sx={{ cursor: "pointer", "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } }}
+                  >
                     <TableCell sx={{ px: { xs: 0.75, sm: 2 }, textAlign: { xs: "center", sm: "left" } }}><ScheduleKickoff value={match.kickoffAt} /></TableCell>
                     <TableCell align="center" sx={{ display: { xs: "none", sm: "table-cell" } }}>{match.group ? `Group ${match.group}` : match.round}</TableCell>
                     <TableCell align="center">
@@ -563,6 +594,10 @@ function ScheduleTable({ title, matches, teamMap }: { title: string; matches: Ma
 function KnockoutView({ state, teamMap }: { state: AppState; teamMap: Map<string, Team> }) {
   const [selectedRounds, setSelectedRounds] = useState<RoundId[]>([...ROUND_IDS]);
   const picksByMember = new Map(state.picks.map((pick) => [pick.memberId, pick]));
+  const rankedMembers = membersInLeaderboardOrder(state);
+  const actualWinnersByRound = new Map(
+    ROUND_IDS.map((round) => [round, new Map(state.actualBracket[round].map((slot) => [slot.slotId, slot.winnerId]))]),
+  );
   const visibleMatchCount = selectedRounds.reduce(
     (total, round) => total + (state.picks[0]?.knockout[round].length ?? 0),
     0,
@@ -670,7 +705,7 @@ function KnockoutView({ state, teamMap }: { state: AppState; teamMap: Map<string
             </TableRow>
           </TableHead>
           <TableBody>
-            {state.members.map((member) => {
+            {rankedMembers.map((member) => {
               const pick = picksByMember.get(member.id);
               return (
                 <TableRow key={member.id} hover sx={{ height: COMPARISON_BODY_ROW_HEIGHT }}>
@@ -678,14 +713,29 @@ function KnockoutView({ state, teamMap }: { state: AppState; teamMap: Map<string
                     {member.displayName}
                   </TableCell>
                   {selectedRounds.flatMap((round) =>
-                    (pick?.knockout[round] ?? []).map((match, index) => (
-                      <TableCell
-                        key={`${round}-${match.slotId}`}
-                        sx={{ minWidth: COMPARISON_PICK_COLUMN_WIDTH, ...(index === 0 ? { borderLeft: "1px solid", borderLeftColor: "divider" } : {}) }}
-                      >
-                        <TeamLabel teamMap={teamMap} teamId={match.winnerId} />
-                      </TableCell>
-                    )),
+                    (pick?.knockout[round] ?? []).map((match, index) => {
+                      const actualWinnerId = actualWinnersByRound.get(round)?.get(match.slotId);
+                      const isCorrectWinner = Boolean(actualWinnerId && actualWinnerId === match.winnerId);
+                      return (
+                        <TableCell
+                          key={`${round}-${match.slotId}`}
+                          sx={{ minWidth: COMPARISON_PICK_COLUMN_WIDTH, ...(index === 0 ? { borderLeft: "1px solid", borderLeftColor: "divider" } : {}) }}
+                        >
+                          <Box
+                            data-correct-knockout={isCorrectWinner ? "true" : undefined}
+                            sx={{
+                              border: "1px solid",
+                              borderColor: isCorrectWinner ? "success.main" : "transparent",
+                              borderRadius: 1,
+                              px: 0.5,
+                              py: 0.25,
+                            }}
+                          >
+                            <TeamLabel teamMap={teamMap} teamId={match.winnerId} />
+                          </Box>
+                        </TableCell>
+                      );
+                    }),
                   )}
                 </TableRow>
               );
@@ -697,7 +747,7 @@ function KnockoutView({ state, teamMap }: { state: AppState; teamMap: Map<string
   );
 }
 
-function ScheduleView({ state, teamMap }: { state: AppState; teamMap: Map<string, Team> }) {
+function ScheduleView({ state, teamMap, onSelectMatch }: { state: AppState; teamMap: Map<string, Team>; onSelectMatch: (match: Match) => void }) {
   const [filter, setFilter] = useState<ScheduleFilter>("all");
   const sections = scheduleSections(state.matches, filter);
   const showEmptyFilterMessage = state.matches.length > 0 && sections.length === 0;
@@ -766,7 +816,7 @@ function ScheduleView({ state, teamMap }: { state: AppState; teamMap: Map<string
       </Stack>
       {showEmptyFilterMessage ? <Alert severity="info">No {filter} matches to show.</Alert> : null}
       {sections.map((section) => (
-        <ScheduleTable key={section.title} title={section.title} matches={section.matches} teamMap={teamMap} />
+        <ScheduleTable key={section.title} title={section.title} matches={section.matches} teamMap={teamMap} onSelectMatch={onSelectMatch} />
       ))}
     </Stack>
   );
@@ -837,11 +887,12 @@ function Leaderboard({ state, teamMap }: { state: AppState; teamMap: Map<string,
 export function Dashboard({ initialData, initialTab }: { initialData: StaticAppData; initialTab?: string }) {
   const [tab, setTab] = useState(() => dashboardTabIndex(initialTab));
   const [scoringTooltipOpen, setScoringTooltipOpen] = useState(false);
+  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const scoringTooltipUsesClick = useMediaQuery("(hover: none), (pointer: coarse)");
   const canonicalTeamIds = useMemo(() => new Set(initialData.teams.map((team) => team.id)), [initialData.teams]);
   const live = useEspnLiveMatches(canonicalTeamIds);
   const tournamentResults = useMemo(
-    () => (tab <= 1 ? buildTournamentResults(initialData, live.matches) : null),
+    () => (tab <= 2 ? buildTournamentResults(initialData, live.matches) : null),
     [initialData, live.matches, tab],
   );
   const state = useMemo<AppState>(() => ({
@@ -863,6 +914,9 @@ export function Dashboard({ initialData, initialTab }: { initialData: StaticAppD
     leaderboard: tournamentResults?.leaderboard ?? [],
   }), [initialData, live, tournamentResults]);
   const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams]);
+  const activeSelectedMatch = selectedMatch
+    ? state.matches.find((match) => match.providerIds.espn === selectedMatch.providerIds.espn) ?? selectedMatch
+    : null;
 
   useEffect(() => {
     if (initialTab) return;
@@ -912,7 +966,7 @@ export function Dashboard({ initialData, initialTab }: { initialData: StaticAppD
               </Typography>
             </Box>
             <Box sx={{ gridColumn: { xs: "1 / -1", md: 2 }, gridRow: { xs: 2, md: 1 }, minWidth: 0, textAlign: { xs: "center", sm: "left" } }}>
-              <TodayMatches state={state} teamMap={teamMap} />
+              <TodayMatches state={state} teamMap={teamMap} onSelectMatch={setSelectedMatch} />
             </Box>
             <Chip
               label={`Updated ${formatUpdatedLabel(state.capturedAt)}`}
@@ -1001,8 +1055,9 @@ export function Dashboard({ initialData, initialTab }: { initialData: StaticAppD
         {tab === 0 ? <Leaderboard state={state} teamMap={teamMap} /> : null}
         {tab === 1 ? <GroupsView state={state} teamMap={teamMap} /> : null}
         {tab === 2 ? <KnockoutView state={state} teamMap={teamMap} /> : null}
-        {tab === 3 ? <ScheduleView state={state} teamMap={teamMap} /> : null}
+        {tab === 3 ? <ScheduleView state={state} teamMap={teamMap} onSelectMatch={setSelectedMatch} /> : null}
       </Container>
+      <MatchDetailsDialog match={activeSelectedMatch} teamMap={teamMap} onClose={() => setSelectedMatch(null)} />
     </Box>
   );
 }

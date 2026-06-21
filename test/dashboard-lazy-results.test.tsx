@@ -68,4 +68,16 @@ describe("Dashboard live derivation", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Groups" }));
     expect(window.localStorage.getItem("famirywc:last-dashboard-tab")).toBe("Groups");
   });
+
+  it("orders Groups and Knockout participants by the active leaderboard", () => {
+    const initialData = buildStaticAppData();
+    const expectedOrder = tournamentResults.buildTournamentResults(initialData, []).leaderboard.map((entry) => entry.displayName);
+    render(<Dashboard initialData={initialData} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Groups" }));
+    expect(screen.getAllByRole("rowheader").map((cell) => cell.textContent)).toEqual(expectedOrder);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Knockout" }));
+    expect(screen.getAllByRole("rowheader").map((cell) => cell.textContent)).toEqual(expectedOrder);
+  });
 });

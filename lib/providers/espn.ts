@@ -2,6 +2,18 @@ import { matchIdFromIndex, teamIdFromAbbr } from "@/lib/app-data/ids";
 import { GROUP_IDS, type GroupId, type Match, type MatchStatus } from "@/lib/schemas/appData";
 
 export const DEFAULT_ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260719&limit=200";
+export const DEFAULT_ESPN_SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/summary";
+
+export type EspnPlayByPlayEntry = {
+  id: string;
+  sequence: number;
+  clock: string;
+  text: string;
+  type: string | null;
+  teamName: string | null;
+  participants: string[];
+  fieldPosition: { x: number; y: number } | null;
+};
 
 type EspnCompetitor = {
   id?: string;
@@ -50,6 +62,27 @@ type EspnEvent = {
 
 export type EspnScoreboard = {
   events?: EspnEvent[];
+};
+
+type EspnSummaryCommentary = {
+  sequence?: number;
+  time?: { value?: number; displayValue?: string };
+  text?: string;
+  play?: {
+    id?: string;
+    text?: string;
+    type?: { text?: string };
+    clock?: { value?: number; displayValue?: string };
+    period?: { number?: number };
+    team?: { displayName?: string };
+    participants?: Array<{ athlete?: { displayName?: string } }>;
+    fieldPositionX?: number;
+    fieldPositionY?: number;
+  };
+};
+
+export type EspnSummary = {
+  commentary?: EspnSummaryCommentary[];
 };
 
 function knownTeamId(abbr: string | undefined, canonicalTeamIds?: ReadonlySet<string>): string | null {
@@ -152,4 +185,79 @@ export async function fetchEspnScoreboard(options: {
   const json = (await response.json()) as EspnScoreboard;
   const normalized = normalizeEspnScoreboard(json, new Date().toISOString(), options.canonicalTeamIds);
   return { ...normalized, message: null };
+}
+
+function normalizedFieldPosition(x: number | undefined, y: number | undefined): EspnPlayByPlayEntry["fieldPosition"] {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || (x === 0 && y === 0)) return null;
+  return {
+    x: Math.min(1, Math.max(0, x as number)),
+    y: Math.min(1, Math.max(0, y as number)),
+  };
+}
+
+export function normalizeEspnSummary(summary: EspnSummary): EspnPlayByPlayEntry[] {
+  return (summary.commentary ?? [])
+    .flatMap((commentary, index) => {
+      const text = commentary.text ?? commentary.play?.text;
+      if (!text) return [];
+      const sequence = commentary.sequence ?? index;
+      return [{
+        entry: {
+          id: commentary.play?.id ?? `commentary-${sequence}`,
+          sequence,
+          clock: normalizeEspnClock(
+            commentary.play?.clock?.displayValue ?? commentary.time?.displayValue ?? "",
+            commentary.play?.clock?.value ?? commentary.time?.value,
+          ),
+          text,
+          type: commentary.play?.type?.text ?? null,
+          teamName: commentary.play?.team?.displayName ?? null,
+          participants: (commentary.play?.participants ?? []).flatMap((participant) =>
+            participant.athlete?.displayName ? [participant.athlete.displayName] : [],
+          ),
+          fieldPosition: normalizedFieldPosition(commentary.play?.fieldPositionX, commentary.play?.fieldPositionY),
+        },
+        period: commentary.play?.period?.number,
+      }];
+    })
+    // ESPN's clock labels are not arithmetic timestamps: a later event can be
+    // labeled 46'+1' after events labeled 45'+4'. Sequence is the chronology.
+    .sort((a, b) => b.entry.sequence - a.entry.sequence)
+    .map(({ entry }) => entry);
+}
+
+function normalizeEspnClock(displayValue: string, seconds: number | undefined): string {
+  const stoppage = displayValue.match(/^(\d{1,3})['’]\+(\d{1,2})['’]$/);
+  if (!stoppage || !Number.isFinite(seconds)) return displayValue;
+
+  const displayedBase = Number(stoppage[1]);
+  const boundaries = [45, 90, 105, 120];
+  if (boundaries.includes(displayedBase)) return displayValue;
+
+  const elapsedMinutes = (seconds as number) / 60;
+  const boundary = [...boundaries].reverse().find((minute) => elapsedMinutes >= minute);
+  if (boundary === undefined) return displayValue;
+
+  const addedMinute = Math.max(1, Math.ceil(elapsedMinutes - boundary));
+  return `${boundary}'+${addedMinute}'`;
+}
+
+export async function fetchEspnPlayByPlay(eventId: string, options: {
+  signal?: AbortSignal;
+  url?: string;
+} = {}): Promise<{ entries: EspnPlayByPlayEntry[]; capturedAt: string }> {
+  const url = new URL(options.url ?? DEFAULT_ESPN_SUMMARY_URL);
+  url.searchParams.set("event", eventId);
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: { accept: "application/json" },
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`ESPN match summary request failed with ${response.status}`);
+  }
+
+  const summary = (await response.json()) as EspnSummary;
+  return { entries: normalizeEspnSummary(summary), capturedAt: new Date().toISOString() };
 }

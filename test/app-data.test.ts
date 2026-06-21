@@ -4,7 +4,7 @@ import { normalizePicks } from "@/lib/app-data/normalizePicks";
 import { buildLeaderboard } from "@/lib/app-data/scoring";
 import { buildGroupStandings } from "@/lib/app-data/standings";
 import { formatTeamLabel } from "@/lib/app-data/teamDisplay";
-import { DEFAULT_ESPN_SCOREBOARD_URL, normalizeEspnScoreboard } from "@/lib/providers/espn";
+import { DEFAULT_ESPN_SCOREBOARD_URL, normalizeEspnScoreboard, normalizeEspnSummary } from "@/lib/providers/espn";
 import familyPicks from "@/data/family_bracket_picks.json";
 import scoringRules from "@/data/scoring_rules.json";
 import type { AppState, Match } from "@/lib/schemas/appData";
@@ -223,6 +223,48 @@ describe("app data", () => {
 
   it("uses the full ESPN World Cup schedule URL as the default", () => {
     expect(DEFAULT_ESPN_SCOREBOARD_URL).toBe("https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260719&limit=200");
+  });
+
+  it("normalizes ESPN commentary newest-first with optional field positions", () => {
+    const entries = normalizeEspnSummary({ commentary: [
+      { sequence: 1, time: { displayValue: "1'" }, text: "Match starts." },
+      {
+        sequence: 2,
+        text: "Shot by Mexico.",
+        play: {
+          id: "play_2",
+          type: { text: "Shot" },
+          clock: { displayValue: "2'" },
+          team: { displayName: "Mexico" },
+          participants: [{ athlete: { displayName: "Player One" } }],
+          fieldPositionX: 0.72,
+          fieldPositionY: 0.4,
+        },
+      },
+    ] });
+
+    expect(entries.map((entry) => entry.id)).toEqual(["play_2", "commentary-1"]);
+    expect(entries[0]).toMatchObject({
+      clock: "2'",
+      type: "Shot",
+      teamName: "Mexico",
+      participants: ["Player One"],
+      fieldPosition: { x: 0.72, y: 0.4 },
+    });
+    expect(entries[1].fieldPosition).toBeNull();
+  });
+
+  it("uses ESPN sequence order when stoppage-time clock labels overlap", () => {
+    const entries = normalizeEspnSummary({ commentary: [
+      { sequence: 10, text: "Earlier foul", play: { clock: { displayValue: "45'+4'" }, period: { number: 1 } } },
+      { sequence: 11, time: { value: 2702, displayValue: "46'+1'" }, text: "Added-time announcement" },
+    ] });
+
+    expect(entries.map((entry) => entry.text)).toEqual([
+      "Added-time announcement",
+      "Earlier foul",
+    ]);
+    expect(entries[0].clock).toBe("45'+1'");
   });
 
 });

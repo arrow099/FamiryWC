@@ -3,6 +3,19 @@ import { expect, test } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
   const now = Date.now();
   await page.route("https://site.api.espn.com/**", async (route) => {
+    if (new URL(route.request().url()).pathname.endsWith("/summary")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          commentary: [{
+            sequence: 1,
+            text: "Shot by Mexico.",
+            play: { id: "play_1", type: { text: "Shot" }, clock: { displayValue: "45'" }, fieldPositionX: 0.72, fieldPositionY: 0.4 },
+          }],
+        }),
+      });
+      return;
+    }
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -91,6 +104,10 @@ test("renders dashboard and core tabs", async ({ page, isMobile }) => {
   expect(statusBox).not.toBeNull();
   expect(cardBox!.x + cardBox!.width - statusBox!.x - statusBox!.width).toBeLessThanOrEqual(10);
   await expect(page.getByLabel("Today's matches").getByText(/LIVE 45'/)).toBeVisible();
+  await page.getByLabel("Today's matches").getByText(/LIVE 45'/).click();
+  await expect(page.getByRole("dialog")).toContainText("Shot by Mexico.");
+  await expect(page.getByRole("dialog")).not.toContainText("Last play position");
+  await page.getByRole("button", { name: "Close match details" }).click();
   const leaderboardHeading = page.getByRole("heading", { name: "Leaderboard", exact: true });
   if (isMobile) {
     await expect(leaderboardHeading).toHaveCount(0);
@@ -161,6 +178,7 @@ test("renders dashboard and core tabs", async ({ page, isMobile }) => {
   await roundFilter.getByRole("button", { name: "Show Final" }).click();
   await expect(page.getByRole("columnheader", { name: "Final" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Round of 32" })).toHaveCount(0);
+  await expect(page.locator('[data-correct-knockout="true"]')).toHaveCount(0);
   const bracketScrollHint = page.getByText("Scroll horizontally to compare all knockout picks", { exact: true });
   if (isMobile) {
     await expect(bracketScrollHint).toBeVisible();
@@ -187,6 +205,10 @@ test("renders dashboard and core tabs", async ({ page, isMobile }) => {
       await expect(visibleColumnHeaders.first()).toBeVisible();
     }
   }
+  const todayCard = page.getByRole("heading", { name: "Today" }).locator("../..");
+  await todayCard.locator("tbody tr").first().click();
+  await expect(page.getByRole("dialog")).toContainText("This game has not started yet");
+  await page.getByRole("button", { name: "Close match details" }).click();
 
   await page.getByRole("tab", { name: "Leaderboard" }).click();
   const scoringRulesButton = page.getByRole("button", { name: "Show scoring rules" });

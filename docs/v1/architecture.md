@@ -65,6 +65,8 @@ All transformations are immutable. Polling replaces snapshots rather than mutati
 
 The ESPN scoreboard currently allows browser cross-origin requests. This endpoint is not a contracted API, so CORS policy or payload shape can change without notice.
 
+Selecting a header match card or Schedule row opens a shared match-details dialog. Started matches fetch ESPN's event summary on demand; live dialogs poll play-by-play every 10 seconds while visible, while completed matches fetch once. Pending matches do not request a summary.
+
 Every visible browser is an independent poller. At a 30-second interval, one continuously visible client can make 120 requests per hour. The expected family-sized audience makes this acceptable for v1, but the architecture should return to a shared cache or managed backend if provider limits, reliability, or audience size become material.
 
 ## Deployment
