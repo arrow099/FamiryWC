@@ -29,6 +29,7 @@ import {
   useMediaQuery,
 } from "@mui/material";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import { alpha } from "@mui/material/styles";
 import { MatchDetailsDialog } from "@/components/MatchDetailsDialog";
 import { useEspnLiveMatches } from "@/hooks/useEspnLiveMatches";
 import { buildTournamentResults, emptyActualBracket, emptyGroups } from "@/lib/app-data/deriveTournamentResults";
@@ -67,7 +68,7 @@ const SCHEDULE_FILTERS: Array<{ label: string; value: ScheduleFilter }> = [
   { label: "Past", value: "past" },
 ];
 
-function TeamLabel({ teamMap, teamId }: { teamMap: Map<string, Team>; teamId: string | null | undefined }) {
+function TeamLabel({ teamMap, teamId, color = "text.secondary" }: { teamMap: Map<string, Team>; teamId: string | null | undefined; color?: string }) {
   if (!teamId) return "-";
   const team = teamMap.get(teamId);
   if (!team) return teamId;
@@ -77,7 +78,7 @@ function TeamLabel({ teamMap, teamId }: { teamMap: Map<string, Team>; teamId: st
       <Box component="span" aria-hidden="true" title={`${team.abbr} flag`} sx={{ fontSize: "1.05em", lineHeight: 1 }}>
         {flagForTeam(team)}
       </Box>
-      <Box component="span" sx={{ color: "text.secondary", fontWeight: 800, letterSpacing: 0 }}>
+      <Box component="span" sx={{ color, fontWeight: 800, letterSpacing: 0 }}>
         {team.abbr}
       </Box>
     </Stack>
@@ -468,27 +469,43 @@ function GroupsView({ state, teamMap }: { state: AppState; teamMap: Map<string, 
                   <TableCell component="th" scope="row" title={member.displayName} sx={{ ...comparisonStickyPlayerCellSx, fontWeight: 800 }}>
                     {member.displayName}
                   </TableCell>
-                  {selectedGroups.flatMap((group) => [1, 2, 3, 4].map((position) => {
-                    const teamId = pick?.groups[group].find((groupPick) => groupPick.position === position)?.teamId;
-                    const currentTeamId = state.groups[group].find((standing) => standing.position === position)?.teamId;
-                    const isCorrectPosition = Boolean(teamId && teamId === currentTeamId);
-                    return (
-                      <TableCell key={`${group}-${position}`} sx={{ minWidth: COMPARISON_PICK_COLUMN_WIDTH, ...(position === 1 ? { borderLeft: "1px solid", borderLeftColor: "divider" } : {}) }}>
-                        <Box
-                          data-correct-position={isCorrectPosition ? "true" : undefined}
-                          sx={{
-                            border: "1px solid",
-                            borderColor: isCorrectPosition ? "success.main" : "transparent",
-                            borderRadius: 1,
-                            px: 0.5,
-                            py: 0.25,
-                          }}
-                        >
-                          <TeamLabel teamMap={teamMap} teamId={teamId} />
-                        </Box>
-                      </TableCell>
-                    );
-                  }))}
+                  {selectedGroups.flatMap((group) => {
+                    const groupPicks = pick?.groups[group] ?? [];
+                    const currentStandings = state.groups[group];
+                    const isEntireGroupCorrect = currentStandings.length === groupPicks.length
+                      && groupPicks.length === 4
+                      && groupPicks.every((groupPick) => currentStandings.some((standing) => (
+                        standing.position === groupPick.position && standing.teamId === groupPick.teamId
+                      )));
+
+                    return [1, 2, 3, 4].map((position) => {
+                      const teamId = pick?.groups[group].find((groupPick) => groupPick.position === position)?.teamId;
+                      const currentTeamId = currentStandings.find((standing) => standing.position === position)?.teamId;
+                      const isCorrectPosition = Boolean(teamId && teamId === currentTeamId);
+                      return (
+                        <TableCell key={`${group}-${position}`} sx={{ minWidth: COMPARISON_PICK_COLUMN_WIDTH, ...(position === 1 ? { borderLeft: "1px solid", borderLeftColor: "divider" } : {}) }}>
+                          <Box
+                            data-correct-position={isCorrectPosition ? "true" : undefined}
+                            data-correct-group={isEntireGroupCorrect ? "true" : undefined}
+                            sx={{
+                              border: "1px solid",
+                              borderColor: isCorrectPosition ? "success.main" : "transparent",
+                              borderRadius: 1,
+                              bgcolor: (theme) => (
+                                isEntireGroupCorrect
+                                  ? theme.palette.success.main
+                                  : isCorrectPosition ? alpha(theme.palette.success.main, 0.12) : "transparent"
+                              ),
+                              px: 0.5,
+                              py: 0.25,
+                            }}
+                          >
+                            <TeamLabel teamMap={teamMap} teamId={teamId} color={isEntireGroupCorrect ? "common.white" : undefined} />
+                          </Box>
+                        </TableCell>
+                      );
+                    });
+                  })}
                 </TableRow>
               );
             })}

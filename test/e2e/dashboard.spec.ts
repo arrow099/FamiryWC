@@ -132,6 +132,7 @@ test("renders dashboard and core tabs", async ({ page, isMobile }) => {
   const correctMexicoPick = leppyRow.locator('[data-correct-position="true"]').filter({ hasText: "MEX" });
   await expect(correctMexicoPick).toHaveCount(1);
   await expect(correctMexicoPick).toHaveCSS("border-top-color", "rgb(19, 138, 75)");
+  await expect(correctMexicoPick).toHaveCSS("background-color", "rgba(19, 138, 75, 0.12)");
   const groupsScrollHint = page.getByText("Scroll horizontally to compare all group picks", { exact: true });
   if (isMobile) {
     await expect(groupsScrollHint).toBeVisible();

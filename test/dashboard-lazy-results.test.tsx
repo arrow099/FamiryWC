@@ -80,4 +80,38 @@ describe("Dashboard live derivation", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Knockout" }));
     expect(screen.getAllByRole("rowheader").map((cell) => cell.textContent)).toEqual(expectedOrder);
   });
+
+  it("fills every pick green when all four group positions are correct", () => {
+    const initialData = buildStaticAppData();
+    const results = tournamentResults.buildTournamentResults(initialData, []);
+    const firstMember = initialData.members[0];
+    const groupPicks = initialData.picks.find((pick) => pick.memberId === firstMember.id)!.groups.A;
+    results.groups.A = groupPicks.map((pick) => ({
+      teamId: pick.teamId,
+      position: pick.position,
+      played: 3,
+      won: 0,
+      drawn: 0,
+      lost: 0,
+      goalsFor: 0,
+      goalsAgainst: 0,
+      goalDifference: 0,
+      points: 0,
+      qualified: pick.position <= 2,
+      qualificationType: "unknown",
+    }));
+    vi.spyOn(tournamentResults, "buildTournamentResults").mockReturnValue(results);
+    render(<Dashboard initialData={initialData} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Groups" }));
+    const rowHeader = screen.getByRole("rowheader", { name: firstMember.displayName });
+    const row = rowHeader.closest("tr")!;
+    const exactGroupBadges = row.querySelectorAll('[data-correct-group="true"]');
+
+    expect(exactGroupBadges).toHaveLength(4);
+    for (const badge of exactGroupBadges) {
+      expect(getComputedStyle(badge).backgroundColor).toBe("rgb(46, 125, 50)");
+      expect(getComputedStyle(badge.querySelector("span span:last-child")!).color).toBe("rgb(255, 255, 255)");
+    }
+  });
 });
