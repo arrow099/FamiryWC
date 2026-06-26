@@ -1,4 +1,4 @@
-export const DASHBOARD_TAB_LABELS = ["Leaderboard", "Groups", "Knockout", "Schedule"] as const;
+export const DASHBOARD_TAB_LABELS = ["Leaderboard", "Groups", "Knockout", "Schedule", "Stats"] as const;
 export const LAST_DASHBOARD_TAB_STORAGE_KEY = "famirywc:last-dashboard-tab";
 export const LAST_DASHBOARD_TAB_COOKIE_KEY = "famirywc-last-dashboard-tab";
 

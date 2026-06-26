@@ -4,7 +4,7 @@ import { normalizePicks } from "@/lib/app-data/normalizePicks";
 import { buildLeaderboard } from "@/lib/app-data/scoring";
 import { buildGroupStandings } from "@/lib/app-data/standings";
 import { formatTeamLabel } from "@/lib/app-data/teamDisplay";
-import { DEFAULT_ESPN_SCOREBOARD_URL, normalizeEspnScoreboard, normalizeEspnSummary } from "@/lib/providers/espn";
+import { DEFAULT_ESPN_SCOREBOARD_URL, normalizeEspnMatchStats, normalizeEspnScoreboard, normalizeEspnSummary } from "@/lib/providers/espn";
 import familyPicks from "@/data/family_bracket_picks.json";
 import scoringRules from "@/data/scoring_rules.json";
 import type { AppState, Match } from "@/lib/schemas/appData";
@@ -265,6 +265,65 @@ describe("app data", () => {
       "Earlier foul",
     ]);
     expect(entries[0].clock).toBe("45'+1'");
+  });
+
+  it("normalizes ESPN boxscore, roster, and scoring stats", () => {
+    const stats = normalizeEspnMatchStats("633850", {
+      boxscore: {
+        teams: [{
+          team: { abbreviation: "ARG", shortDisplayName: "Argentina" },
+          statistics: [
+            { name: "totalShots", displayName: "Shots", value: 20, displayValue: "20" },
+            { name: "possessionPct", displayName: "Possession", value: 54.2, displayValue: "54.2%" },
+          ],
+        }],
+      },
+      rosters: [{
+        team: { abbreviation: "ARG", shortDisplayName: "Argentina" },
+        roster: [{
+          athlete: { displayName: "Lionel Messi" },
+          starter: true,
+          stats: [
+            { name: "totalGoals", displayName: "Goals", value: 2, displayValue: "2" },
+            { name: "shotsOnTarget", displayName: "Shots on Target", value: 3, displayValue: "3" },
+          ],
+        }],
+      }],
+      header: {
+        competitions: [{
+          details: [{
+            clock: { displayValue: "23'" },
+            team: { displayName: "Argentina" },
+            scoringType: { displayName: "Goal" },
+            athletesInvolved: [{ displayName: "Lionel Messi" }],
+          }],
+        }],
+      },
+      commentary: [{ sequence: 1, time: { displayValue: "1'" }, text: "Match starts." }],
+    }, "2026-06-21T12:00:00.000Z");
+
+    expect(stats).toMatchObject({
+      eventId: "633850",
+      capturedAt: "2026-06-21T12:00:00.000Z",
+      teamStats: [{
+        teamAbbr: "ARG",
+        stats: [
+          { key: "totalShots", label: "Shots", value: 20, displayValue: "20" },
+          { key: "possessionPct", label: "Possession", value: 54.2, displayValue: "54.2%" },
+        ],
+      }],
+      playerStats: [{
+        playerName: "Lionel Messi",
+        teamAbbr: "ARG",
+        starter: true,
+        stats: [
+          { key: "totalGoals", value: 2 },
+          { key: "shotsOnTarget", value: 3 },
+        ],
+      }],
+      scoringPlays: [{ clock: "23'", teamName: "Argentina", text: "Goal: Lionel Messi" }],
+    });
+    expect(stats.playByPlay).toHaveLength(1);
   });
 
 });

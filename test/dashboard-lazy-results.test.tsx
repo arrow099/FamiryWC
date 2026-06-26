@@ -43,6 +43,7 @@ describe("Dashboard live derivation", () => {
       "Groups",
       "Knockout",
       "Schedule",
+      "Stats",
     ]);
     expect(screen.queryByRole("tab", { name: "Overview" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Participants" })).not.toBeInTheDocument();
