@@ -32,7 +32,25 @@ function summary(eventId: string, goals: number, saves: number): EspnMatchStatsS
     teamStats: [{
       teamName: "Argentina",
       teamAbbr: "ARG",
-      stats: [{ key: "totalShots", label: "Shots", value: 18, displayValue: "18" }],
+      stats: [
+        { key: "shotsOnTarget", label: "Shots on target", value: 8, displayValue: "8" },
+        { key: "saves", label: "Saves", value: saves, displayValue: String(saves) },
+        { key: "possessionPct", label: "Possession", value: 55, displayValue: "55%" },
+        { key: "cornerKicks", label: "Corners", value: 6, displayValue: "6" },
+        { key: "fouls", label: "Fouls", value: 9, displayValue: "9" },
+        { key: "yellowCards", label: "Yellow cards", value: 1, displayValue: "1" },
+        { key: "redCards", label: "Red cards", value: 0, displayValue: "0" },
+      ],
+    }, {
+      teamName: "Mexico",
+      teamAbbr: "MEX",
+      stats: [
+        { key: "shotsOnTarget", label: "Shots on target", value: 3, displayValue: "3" },
+        { key: "saves", label: "Saves", value: 2, displayValue: "2" },
+        { key: "possessionPct", label: "Possession", value: 45, displayValue: "45%" },
+        { key: "yellowCards", label: "Yellow cards", value: 2, displayValue: "2" },
+        { key: "redCards", label: "Red cards", value: 1, displayValue: "1" },
+      ],
     }],
     playerStats: [{
       playerName: "Player One",
@@ -41,7 +59,10 @@ function summary(eventId: string, goals: number, saves: number): EspnMatchStatsS
       starter: true,
       stats: [
         { key: "totalGoals", label: "Goals", value: goals, displayValue: String(goals) },
+        { key: "goalAssists", label: "Assists", value: 1, displayValue: "1" },
+        { key: "shotsOnTarget", label: "Shots on target", value: 2, displayValue: "2" },
         { key: "saves", label: "Saves", value: saves, displayValue: String(saves) },
+        { key: "accuratePasses", label: "Accurate passes", value: 21, displayValue: "21" },
       ],
     }],
     scoringPlays: [{ id: "scoring-1", clock: "10'", teamName: "Argentina", text: "Goal: Player One" }],
@@ -64,24 +85,50 @@ describe("stats highlights", () => {
       ],
     );
 
-    expect(data.tournamentHighlights[0]).toMatchObject({
-      scope: "tournament",
-      title: "Best so far: Goals",
-      subject: "Player One",
-      valueLabel: "3",
+    expect(data.liveMatchStats[0]).toMatchObject({
+      matchId: "match_003",
+      matchLabel: "Argentina vs Mexico",
     });
-    expect(data.liveHighlights[0]).toMatchObject({
-      scope: "live",
-      title: "Live standout: Saves",
-      valueLabel: "5",
+    expect(data.liveMatchStats[0].cards.map((card) => card.title)).toEqual([
+      "Score",
+      "Shots on target",
+      "Cards",
+    ]);
+    expect(data.liveMatchStats[0].cards[0]).toMatchObject({
+      homeValueLabel: "1",
+      awayValueLabel: "1",
     });
-    expect(data.playerLeaderboards.totalGoals.map((row) => row.valueLabel)).toEqual(["4"]);
-    expect(data.playerLeaderboards.totalGoals[0].matchLabel).toBe("Tournament total");
-    expect(data.teamLeaderboards.totalGoals.map((row) => ({ subject: row.subject, valueLabel: row.valueLabel }))).toEqual([
+    expect(data.liveMatchStats[0].cards.find((card) => card.title === "Cards")).toMatchObject({
+      homeValueLabel: "🟨 1 / 0",
+      awayValueLabel: "🟨🟨 2 / 🟥 1",
+    });
+    expect(data.tournamentHighlights.playerTournamentGoals[0]).toMatchObject({ statLabel: "Player goals", valueLabel: "4" });
+    expect(data.tournamentHighlights.teamTournamentGoals[0]).toMatchObject({ statLabel: "Team goals", valueLabel: "6" });
+    expect(data.tournamentHighlights.playerTournamentGoals.map((row) => row.valueLabel)).toEqual(["4"]);
+    expect(data.tournamentHighlights.playerTournamentGoals[0]).toMatchObject({ statLabel: "Player goals", matchLabel: "Tournament total" });
+    expect(data.tournamentHighlights.playerSingleMatchGoals[0]).toMatchObject({ statLabel: "Single-match player goals", valueLabel: "3" });
+    expect(data.tournamentHighlights.teamTournamentGoals.map((row) => ({ subject: row.subject, valueLabel: row.valueLabel }))).toEqual([
       { subject: "Argentina", valueLabel: "6" },
       { subject: "Mexico", valueLabel: "1" },
     ]);
-    expect(data.teamLeaderboards.totalGoals[0].matchLabel).toBe("Tournament total");
-    expect(data.teamLeaderboards.totalShots).toHaveLength(2);
+    expect(data.tournamentHighlights.teamTournamentGoals[0]).toMatchObject({ statLabel: "Team goals", matchLabel: "Tournament total" });
+    expect(data.tournamentHighlights.teamSingleMatchGoals[0]).toMatchObject({ statLabel: "Single-match team goals", subject: "Argentina", valueLabel: "4" });
+    expect(Object.keys(data.tournamentHighlights)).toEqual([
+      "playerTournamentGoals",
+      "teamTournamentGoals",
+      "playerSingleMatchGoals",
+      "teamSingleMatchGoals",
+      "playerShotsOnTarget",
+      "teamShotsOnTarget",
+      "corners",
+    ]);
+    expect(data.tournamentHighlights.assists).toBeUndefined();
+    expect(data.tournamentHighlights.playerSaves).toBeUndefined();
+    expect(data.tournamentHighlights.teamSaves).toBeUndefined();
+    expect(data.tournamentHighlights.possession).toBeUndefined();
+    expect(data.tournamentHighlights.playerPassing).toBeUndefined();
+    expect(data.tournamentHighlights.teamPassing).toBeUndefined();
+    expect(data.tournamentHighlights.passPercentage).toBeUndefined();
+    expect(data.tournamentHighlights.fouls).toBeUndefined();
   });
 });

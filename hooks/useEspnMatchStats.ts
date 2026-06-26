@@ -26,6 +26,15 @@ type CachedSummary = EspnMatchStatsSummary & {
   cacheSignature: string;
 };
 
+function summarySignature(summary: EspnMatchStatsSummary): string {
+  const cached = summary as CachedSummary;
+  return `${summary.eventId}|${summary.capturedAt}|${cached.cacheSignature ?? ""}`;
+}
+
+function summariesEqual(left: EspnMatchStatsSummary[], right: EspnMatchStatsSummary[]): boolean {
+  return left.length === right.length && left.every((summary, index) => summarySignature(summary) === summarySignature(right[index]));
+}
+
 function cacheSignature(match: Match): string {
   return [
     match.providerIds.espn,
@@ -59,20 +68,32 @@ export function useEspnMatchStats(matches: Match[], enabled: boolean, pollInterv
     () => matches.filter((match) => match.providerIds.espn && (match.status === "post" || match.status === "in")),
     [matches],
   );
+  const targetMatchesRef = useRef<Match[]>(targetMatches);
+  targetMatchesRef.current = targetMatches;
   const targetKey = useMemo(() => targetMatches.map((match) => cacheSignature(match)).join("::"), [targetMatches]);
 
   const refresh = useCallback(async () => {
-    if (!enabled || targetMatches.length === 0 || inFlight.current) return;
+    const matchesToFetch = targetMatchesRef.current;
+    if (!enabled || matchesToFetch.length === 0 || inFlight.current) return;
     const controller = new AbortController();
     inFlight.current = controller;
-    setState((current) => ({ ...current, loading: current.capturedAt === null, refreshing: true, message: null }));
+    setState((current) => {
+      if (current.summaries.length > 0 && current.capturedAt !== null && !current.message) return current;
+
+      return {
+        ...current,
+        loading: current.capturedAt === null,
+        refreshing: true,
+        message: current.summaries.length === 0 ? current.message : null,
+      };
+    });
 
     try {
       const cache = readCache();
       const fetched: EspnMatchStatsSummary[] = [];
       const summaries: EspnMatchStatsSummary[] = [];
 
-      for (const match of targetMatches) {
+      for (const match of matchesToFetch) {
         const eventId = match.providerIds.espn!;
         const signature = cacheSignature(match);
         const cached = cache[eventId];
@@ -91,7 +112,19 @@ export function useEspnMatchStats(matches: Match[], enabled: boolean, pollInterv
       const capturedAt = summaries.reduce<string | null>((latest, summary) => (
         latest === null || summary.capturedAt > latest ? summary.capturedAt : latest
       ), null);
-      setState({ summaries, capturedAt, loading: false, refreshing: false, message: null });
+      setState((current) => {
+        if (
+          !current.loading
+          && !current.refreshing
+          && current.message === null
+          && current.capturedAt === capturedAt
+          && summariesEqual(current.summaries, summaries)
+        ) {
+          return current;
+        }
+
+        return { summaries, capturedAt, loading: false, refreshing: false, message: null };
+      });
     } catch (error) {
       if (controller.signal.aborted) return;
       setState((current) => ({
@@ -103,13 +136,18 @@ export function useEspnMatchStats(matches: Match[], enabled: boolean, pollInterv
     } finally {
       if (inFlight.current === controller) inFlight.current = null;
     }
-  }, [enabled, targetMatches]);
+  }, [enabled]);
 
   useEffect(() => {
     inFlight.current?.abort();
     inFlight.current = null;
-    setState(enabled && targetMatches.length > 0 ? { ...EMPTY_STATE, loading: true } : EMPTY_STATE);
-    if (!enabled || targetMatches.length === 0) return;
+    const matchesToFetch = targetMatchesRef.current;
+    setState((current) => {
+      if (!enabled || matchesToFetch.length === 0) return current === EMPTY_STATE ? current : EMPTY_STATE;
+      if (current.summaries.length > 0 || current.capturedAt !== null) return current;
+      return current.loading && current.refreshing ? current : { ...current, loading: true, refreshing: true };
+    });
+    if (!enabled || matchesToFetch.length === 0) return;
 
     let intervalId: number | null = null;
     const stopPolling = () => {
@@ -118,7 +156,7 @@ export function useEspnMatchStats(matches: Match[], enabled: boolean, pollInterv
     };
     const startPolling = () => {
       stopPolling();
-      if (targetMatches.some((match) => match.status === "in") && document.visibilityState === "visible") {
+      if (targetMatchesRef.current.some((match) => match.status === "in") && document.visibilityState === "visible") {
         intervalId = window.setInterval(refresh, pollIntervalMs);
       }
     };
@@ -136,7 +174,7 @@ export function useEspnMatchStats(matches: Match[], enabled: boolean, pollInterv
       inFlight.current?.abort();
       inFlight.current = null;
     };
-  }, [enabled, pollIntervalMs, refresh, targetKey, targetMatches]);
+  }, [enabled, pollIntervalMs, refresh, targetKey]);
 
   return state;
 }

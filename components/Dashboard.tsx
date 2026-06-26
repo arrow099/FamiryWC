@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Alert,
   AppBar,
@@ -42,7 +42,7 @@ import {
   LAST_DASHBOARD_TAB_STORAGE_KEY,
   dashboardTabIndex,
 } from "@/lib/dashboardPreferences";
-import { buildStatsDashboardData, type StatsDashboardData, type StatsHighlight, type StatsLeaderboardRow } from "@/lib/statsHighlights";
+import { buildStatsDashboardData, type StatsDashboardData, type StatsLiveMatchGroup, type StatsLeaderboardRow } from "@/lib/statsHighlights";
 import type { AppState, GroupId, Match, RoundId, StaticAppData, Team } from "@/lib/schemas/appData";
 import { GROUP_IDS, ROUND_IDS } from "@/lib/schemas/appData";
 
@@ -54,7 +54,7 @@ const TAB_DESCRIPTIONS = [
   "Compare every player's group-stage predictions",
   "Compare every player's knockout predictions",
   "Live, upcoming, and completed tournament matches",
-  "Tournament stats, live facts, and player leaderboards",
+  "Tournament highlights and live match stats",
 ] as const;
 const BRACKET_ROUND_LABELS: Record<RoundId, string> = {
   R32: "Round of 32",
@@ -848,17 +848,15 @@ function StatsView({
   loading,
   message,
   teamMap,
-  onSelectMatch,
 }: {
   state: AppState;
   stats: StatsDashboardData;
   loading: boolean;
   message: string | null;
   teamMap: Map<string, Team>;
-  onSelectMatch: (match: Match) => void;
 }) {
   const hasStartedMatches = state.matches.some((match) => match.providerIds.espn && (match.status === "post" || match.status === "in"));
-  const hasStats = stats.tournamentHighlights.length > 0 || stats.liveHighlights.length > 0;
+  const hasStats = stats.liveMatchStats.length > 0 || Object.values(stats.tournamentHighlights).some((rows) => rows.length > 0);
 
   if (!hasStartedMatches) {
     return <Alert severity="info">Stats will appear after World Cup matches kick off.</Alert>;
@@ -868,124 +866,123 @@ function StatsView({
     <Stack spacing={{ xs: 1.5, md: 2 }}>
       {loading ? <LinearProgress /> : null}
       {message ? <Alert severity={hasStats ? "warning" : "error"}>{message}</Alert> : null}
-      <StatsHighlightSection
+      <LiveStatsSection
         title="Live Match Stats"
         emptyText="No live-match stats right now."
-        highlights={stats.liveHighlights}
-        matches={state.matches}
+        groups={stats.liveMatchStats}
         teamMap={teamMap}
-        onSelectMatch={onSelectMatch}
       />
-      <StatsHighlightSection
-        title="Tournament Highlights"
-        emptyText="No completed-match stats loaded yet."
-        highlights={stats.tournamentHighlights}
-        matches={state.matches}
-        teamMap={teamMap}
-        onSelectMatch={onSelectMatch}
-      />
-      <Box
-        sx={{
-          display: "grid",
-          gap: 2,
-          gridTemplateColumns: { xs: "1fr", lg: "repeat(2, minmax(0, 1fr))" },
-        }}
-      >
-        <StatsLeaderboard title="Player Leaderboards" rowsByStat={stats.playerLeaderboards} teamMap={teamMap} />
-        <StatsLeaderboard title="Team Leaderboards" rowsByStat={stats.teamLeaderboards} teamMap={teamMap} />
-      </Box>
+      <StatsLeaderboard title="Tournament Highlights" rowsByStat={stats.tournamentHighlights} teamMap={teamMap} />
     </Stack>
   );
 }
 
-function StatsHighlightSection({
+function LiveStatsSection({
   title,
   emptyText,
-  highlights,
-  matches,
+  groups,
   teamMap,
-  onSelectMatch,
 }: {
   title: string;
   emptyText: string;
-  highlights: StatsHighlight[];
-  matches: Match[];
+  groups: StatsLiveMatchGroup[];
   teamMap: Map<string, Team>;
-  onSelectMatch: (match: Match) => void;
 }) {
   return (
-    <Box>
-      <Typography variant="h3" sx={{ mb: 1 }}>{title}</Typography>
-      {highlights.length === 0 ? (
-        <Card variant="outlined">
-          <CardContent>
-            <Typography variant="body2" color="text.secondary">{emptyText}</Typography>
-          </CardContent>
-        </Card>
-      ) : (
-        <Box
-          sx={{
-            display: "grid",
-            gap: 1,
-            gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(4, minmax(0, 1fr))" },
-          }}
-        >
-          {highlights.map((highlight) => {
-            const match = matches.find((candidate) => candidate.id === highlight.matchId);
-            return (
-              <Paper key={highlight.id} variant="outlined" sx={{ p: 1.25, minWidth: 0 }}>
-                <Stack spacing={0.5} sx={{ height: "100%" }}>
-                  <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-                    <Chip size="small" color={highlight.scope === "live" ? "error" : "primary"} label={highlight.title} sx={{ minWidth: 0 }} />
-                    <Typography variant="body2" fontWeight={900}>{highlight.valueLabel}</Typography>
-                  </Stack>
-                  <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
-                    <StatsFlag teamMap={teamMap} teamId={highlight.teamId} teamAbbr={highlight.teamAbbr} />
-                    <Typography variant="body1" fontWeight={900}>{highlight.subject}</Typography>
-                  </Stack>
-                  <Typography variant="body2" color="text.secondary">{highlight.detail}</Typography>
-                  <Typography variant="caption" color="text.secondary">{highlight.evidence}</Typography>
-                  {match ? (
-                    <Box sx={{ mt: "auto", pt: 0.5 }}>
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label="Open match"
-                        onClick={() => onSelectMatch(match)}
-                        sx={{ fontWeight: 800 }}
-                      />
-                    </Box>
-                  ) : null}
-                </Stack>
-              </Paper>
-            );
-          })}
-        </Box>
-      )}
-    </Box>
+    <Card variant="outlined">
+      <CardContent>
+        <Typography variant="h3" sx={{ mb: 1 }}>{title}</Typography>
+        {groups.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">{emptyText}</Typography>
+        ) : (
+          <Stack spacing={1.5}>
+            {groups.map((group) => (
+              <LiveMatchStatsPanel key={group.matchId} group={group} teamMap={teamMap} />
+            ))}
+          </Stack>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function LiveMatchStatsPanel({ group, teamMap }: { group: StatsLiveMatchGroup; teamMap: Map<string, Team> }) {
+  const score = group.cards.find((card) => card.title === "Score");
+  const rows = group.cards.filter((card) => card.title !== "Score");
+
+  if (!score) return null;
+
+  return (
+    <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+      <Box
+        sx={{
+          alignItems: "center",
+          bgcolor: "background.default",
+          borderBottom: "1px solid",
+          borderColor: "divider",
+          display: "grid",
+          gap: 1,
+          gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
+          px: { xs: 1, sm: 1.5 },
+          py: 1,
+        }}
+      >
+        <LiveMatchTeamHeader teamMap={teamMap} teamId={score.homeTeamId} teamName={score.homeTeamName} align="left" />
+        <Typography variant="h2" color="primary.main" fontWeight={950} sx={{ lineHeight: 1, whiteSpace: "nowrap" }}>
+          {score.homeValueLabel} - {score.awayValueLabel}
+        </Typography>
+        <LiveMatchTeamHeader teamMap={teamMap} teamId={score.awayTeamId} teamName={score.awayTeamName} align="right" />
+      </Box>
+      <Table size="small" sx={{ tableLayout: "fixed", "& .MuiTableCell-root": { px: { xs: 1, sm: 1.5 }, py: 0.75 } }}>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell align="right" sx={{ color: "primary.main", fontSize: "1.1rem", fontWeight: 950, width: "32%" }}>{row.homeValueLabel}</TableCell>
+              <TableCell align="center" sx={{ color: "text.secondary", fontSize: "0.72rem", fontWeight: 900, letterSpacing: 0, textTransform: "uppercase", width: "36%" }}>{row.title}</TableCell>
+              <TableCell align="left" sx={{ color: "primary.main", fontSize: "1.1rem", fontWeight: 950, width: "32%" }}>{row.awayValueLabel}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Paper>
+  );
+}
+
+function LiveMatchTeamHeader({ teamMap, teamId, teamName, align }: { teamMap: Map<string, Team>; teamId: string | null; teamName: string; align: "left" | "right" }) {
+  return (
+    <Stack direction="row" spacing={0.75} alignItems="center" justifyContent={align === "right" ? "flex-end" : "flex-start"} sx={{ minWidth: 0 }}>
+      {align === "left" ? <StatsFlag teamMap={teamMap} teamId={teamId} teamAbbr={null} /> : null}
+      <Typography variant="body2" fontWeight={900} noWrap>{teamName}</Typography>
+      {align === "right" ? <StatsFlag teamMap={teamMap} teamId={teamId} teamAbbr={null} /> : null}
+    </Stack>
   );
 }
 
 function StatsLeaderboard({ title, rowsByStat, teamMap }: { title: string; rowsByStat: Record<string, StatsLeaderboardRow[]>; teamMap: Map<string, Team> }) {
   const statEntries = Object.entries(rowsByStat)
-    .filter(([, rows]) => rows.length > 0)
-    .slice(0, 5);
+    .filter(([, rows]) => rows.length > 0);
 
   return (
-    <Card variant="outlined" sx={{ flex: 1, minWidth: 0 }}>
+    <Card variant="outlined" sx={{ minWidth: 0 }}>
       <CardContent>
         <Typography variant="h3" sx={{ mb: 1 }}>{title}</Typography>
         {statEntries.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">No final-match leaderboards loaded yet.</Typography>
+          <Typography variant="body2" color="text.secondary">No completed-match highlights loaded yet.</Typography>
         ) : (
-          <Stack spacing={1.5}>
+          <Box
+            sx={{
+              display: "grid",
+              gap: 1.5,
+              gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(4, minmax(0, 1fr))" },
+            }}
+          >
             {statEntries.map(([statKey, rows]) => (
-              <Box key={statKey}>
+              <Box key={statKey} sx={{ minWidth: 0 }}>
                 <Typography variant="body2" fontWeight={900} sx={{ mb: 0.5 }}>{rows[0].statLabel}</Typography>
                 <TableContainer component={Paper} variant="outlined">
-                  <Table size="small" sx={{ "& .MuiTableCell-root": { px: { xs: 0.75, sm: 1 } } }}>
+                  <Table size="small" sx={{ "& .MuiTableCell-root": { px: { xs: 2, sm: 2.5 } } }}>
                     <TableBody>
-                      {rows.slice(0, 3).map((row, index) => (
+                      {rows.slice(0, 5).map((row, index) => (
                         <TableRow key={row.id}>
                           <TableCell sx={{ width: 38, fontWeight: 900 }}>{index + 1}</TableCell>
                           <TableCell>
@@ -995,7 +992,7 @@ function StatsLeaderboard({ title, rowsByStat, teamMap }: { title: string; rowsB
                             </Stack>
                             <Typography variant="caption" color="text.secondary">{row.teamAbbr ? `${row.teamAbbr} · ` : ""}{row.matchLabel}</Typography>
                           </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 900, whiteSpace: "nowrap" }}>{row.valueLabel}</TableCell>
+                          <TableCell align="right" sx={{ color: "primary.main", fontSize: "1.1rem", fontWeight: 950, whiteSpace: "nowrap" }}>{row.valueLabel}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1003,7 +1000,7 @@ function StatsLeaderboard({ title, rowsByStat, teamMap }: { title: string; rowsB
                 </TableContainer>
               </Box>
             ))}
-          </Stack>
+          </Box>
         )}
       </CardContent>
     </Card>
@@ -1087,6 +1084,7 @@ export function Dashboard({ initialData, initialTab }: { initialData: StaticAppD
   const [tab, setTab] = useState(() => dashboardTabIndex(initialTab));
   const [scoringTooltipOpen, setScoringTooltipOpen] = useState(false);
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
+  const statsFirstLoadRef = useRef(true);
   const scoringTooltipUsesClick = useMediaQuery("(hover: none), (pointer: coarse)");
   const canonicalTeamIds = useMemo(() => new Set(initialData.teams.map((team) => team.id)), [initialData.teams]);
   const live = useEspnLiveMatches(canonicalTeamIds);
@@ -1118,9 +1116,21 @@ export function Dashboard({ initialData, initialTab }: { initialData: StaticAppD
     () => buildStatsDashboardData(state.matches, matchStats.summaries),
     [matchStats.summaries, state.matches],
   );
+  const hasStartedStatsMatches = state.matches.some((match) => match.providerIds.espn && (match.status === "post" || match.status === "in"));
+  const hasStats = stats.liveMatchStats.length > 0 || Object.values(stats.tournamentHighlights).some((rows) => rows.length > 0);
+  const showStatsLoader = tab === 4 && (
+    (statsFirstLoadRef.current && (matchStats.loading || matchStats.refreshing))
+    || (!hasStats && Boolean(matchStats.message) && (matchStats.loading || matchStats.refreshing))
+  );
   const activeSelectedMatch = selectedMatch
     ? state.matches.find((match) => match.providerIds.espn === selectedMatch.providerIds.espn) ?? selectedMatch
     : null;
+
+  useEffect(() => {
+    if (tab === 4 && hasStartedStatsMatches && !matchStats.loading && !matchStats.refreshing && (matchStats.capturedAt || matchStats.message || hasStats)) {
+      statsFirstLoadRef.current = false;
+    }
+  }, [hasStartedStatsMatches, hasStats, matchStats.capturedAt, matchStats.loading, matchStats.message, matchStats.refreshing, tab]);
 
   useEffect(() => {
     if (initialTab) return;
@@ -1260,7 +1270,7 @@ export function Dashboard({ initialData, initialTab }: { initialData: StaticAppD
         {tab === 1 ? <GroupsView state={state} teamMap={teamMap} /> : null}
         {tab === 2 ? <KnockoutView state={state} teamMap={teamMap} /> : null}
         {tab === 3 ? <ScheduleView state={state} teamMap={teamMap} onSelectMatch={setSelectedMatch} /> : null}
-        {tab === 4 ? <StatsView state={state} stats={stats} loading={matchStats.loading || matchStats.refreshing} message={matchStats.message} teamMap={teamMap} onSelectMatch={setSelectedMatch} /> : null}
+        {tab === 4 ? <StatsView state={state} stats={stats} loading={showStatsLoader} message={matchStats.message} teamMap={teamMap} /> : null}
       </Container>
       <MatchDetailsDialog match={activeSelectedMatch} teamMap={teamMap} onClose={() => setSelectedMatch(null)} />
     </Box>

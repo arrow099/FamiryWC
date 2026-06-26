@@ -2,19 +2,24 @@ import type { EspnMatchStatsSummary, EspnPlayerStats, EspnStatValue, EspnTeamSta
 import { teamIdFromAbbr } from "@/lib/app-data/ids";
 import type { Match } from "@/lib/schemas/appData";
 
-export type StatsHighlight = {
+export type StatsLiveStatCard = {
   id: string;
-  scope: "tournament" | "live";
-  category: "team" | "player" | "match";
   title: string;
-  subject: string;
-  teamId: string | null;
-  teamAbbr: string | null;
-  valueLabel: string;
-  detail: string;
-  evidence: string;
   matchId: string;
   eventId: string;
+  homeTeamId: string | null;
+  awayTeamId: string | null;
+  homeTeamName: string;
+  awayTeamName: string;
+  homeValueLabel: string;
+  awayValueLabel: string;
+};
+
+export type StatsLiveMatchGroup = {
+  matchId: string;
+  eventId: string;
+  matchLabel: string;
+  cards: StatsLiveStatCard[];
 };
 
 export type StatsLeaderboardRow = {
@@ -29,45 +34,38 @@ export type StatsLeaderboardRow = {
 };
 
 export type StatsDashboardData = {
-  tournamentHighlights: StatsHighlight[];
-  liveHighlights: StatsHighlight[];
-  playerLeaderboards: Record<string, StatsLeaderboardRow[]>;
-  teamLeaderboards: Record<string, StatsLeaderboardRow[]>;
+  liveMatchStats: StatsLiveMatchGroup[];
+  tournamentHighlights: Record<string, StatsLeaderboardRow[]>;
 };
 
 const PLAYER_STAT_LABELS: Record<string, string> = {
   totalGoals: "Goals",
-  goalAssists: "Assists",
-  totalShots: "Shots",
   shotsOnTarget: "Shots on target",
-  saves: "Saves",
-  accuratePasses: "Accurate passes",
-  foulsCommitted: "Fouls",
 };
 
 const TEAM_STAT_LABELS: Record<string, string> = {
-  totalShots: "Shots",
   shotsOnTarget: "Shots on target",
-  saves: "Saves",
-  possessionPct: "Possession",
-  accuratePasses: "Accurate passes",
   cornerKicks: "Corners",
-  fouls: "Fouls",
-  tackles: "Tackles",
-  interceptions: "Interceptions",
-  clearances: "Clearances",
 };
 
-const HIGHLIGHT_STATS = new Set([
-  "totalGoals",
-  "goalAssists",
-  "totalShots",
+const PLAYER_LEADERBOARD_ORDER = [
   "shotsOnTarget",
-  "saves",
-  "accuratePasses",
-  "possessionPct",
+] as const;
+
+const TEAM_LEADERBOARD_ORDER = [
+  "shotsOnTarget",
   "cornerKicks",
-]);
+] as const;
+
+const LIVE_TEAM_STAT_LABELS: Record<string, string> = {
+  shotsOnTarget: "Shots on target",
+  yellowCards: "Yellow cards",
+  redCards: "Red cards",
+};
+
+const LIVE_TEAM_STAT_ORDER = [
+  "shotsOnTarget",
+] as const;
 
 type RankedCandidate = {
   category: "team" | "player";
@@ -87,18 +85,26 @@ export function buildStatsDashboardData(matches: Match[], summaries: EspnMatchSt
   const completedMatches = matches.filter((match) => match.status === "post" && match.providerIds.espn && summaryByEventId.has(match.providerIds.espn));
   const liveMatches = matches.filter((match) => match.status === "in" && match.providerIds.espn && summaryByEventId.has(match.providerIds.espn));
   const completedCandidates = completedMatches.flatMap((match) => candidatesForMatch(match, summaryByEventId.get(match.providerIds.espn!)!));
+  const playerHighlights = withGoalLeaderboards(
+    buildAggregatePlayerGoals(completedCandidates),
+    buildSingleMatchPlayerGoals(completedCandidates),
+    buildOrderedLeaderboards(
+      completedCandidates.filter((candidate) => candidate.category === "player" && PLAYER_LEADERBOARD_ORDER.includes(candidate.statKey as typeof PLAYER_LEADERBOARD_ORDER[number])),
+      PLAYER_LEADERBOARD_ORDER,
+    ),
+  );
+  const teamHighlights = withGoalLeaderboards(
+    buildAggregateTeamGoals(completedMatches),
+    buildSingleMatchTeamGoals(completedMatches),
+    buildOrderedLeaderboards(
+      completedCandidates.filter((candidate) => candidate.category === "team" && TEAM_LEADERBOARD_ORDER.includes(candidate.statKey as typeof TEAM_LEADERBOARD_ORDER[number])),
+      TEAM_LEADERBOARD_ORDER,
+    ),
+  );
 
   return {
-    tournamentHighlights: buildTournamentHighlights(completedCandidates),
-    liveHighlights: liveMatches.flatMap((match) => buildLiveHighlights(match, summaryByEventId.get(match.providerIds.espn!)!)).slice(0, 6),
-    playerLeaderboards: withGoalsLeaderboard(
-      buildAggregatePlayerGoals(completedCandidates),
-      buildLeaderboards(completedCandidates.filter((candidate) => candidate.category === "player" && candidate.statKey !== "totalGoals")),
-    ),
-    teamLeaderboards: withGoalsLeaderboard(
-      buildAggregateTeamGoals(completedMatches),
-      buildLeaderboards(completedCandidates.filter((candidate) => candidate.category === "team")),
-    ),
+    liveMatchStats: liveMatches.map((match) => buildLiveMatchStats(match, summaryByEventId.get(match.providerIds.espn!)!)),
+    tournamentHighlights: buildTournamentHighlights(playerHighlights, teamHighlights),
   };
 }
 
@@ -116,7 +122,7 @@ function statCandidatesForTeam(match: Match, summary: EspnMatchStatsSummary, tea
       category: "team" as const,
       statKey: stat.key,
       statLabel: TEAM_STAT_LABELS[stat.key] ?? stat.label,
-      subject: team.teamAbbr ?? team.teamName ?? "Team",
+      subject: team.teamName ?? team.teamAbbr ?? "Team",
       teamId: knownStatsTeamId(team.teamAbbr),
       teamAbbr: team.teamAbbr,
       value: stat.value,
@@ -145,28 +151,73 @@ function statCandidatesForPlayer(match: Match, summary: EspnMatchStatsSummary, p
   });
 }
 
-function buildTournamentHighlights(candidates: RankedCandidate[]): StatsHighlight[] {
-  const topByStat = [...groupCandidates(candidates.filter((candidate) => HIGHLIGHT_STATS.has(candidate.statKey))).entries()]
-    .flatMap(([, statCandidates]) => statCandidates.sort(sortCandidates).slice(0, 1));
+function buildLiveMatchStats(match: Match, summary: EspnMatchStatsSummary): StatsLiveMatchGroup {
+  const homeStats = teamStatsForMatchSide(summary.teamStats, match.homeTeamName, 0);
+  const awayStats = teamStatsForMatchSide(summary.teamStats, match.awayTeamName, 1);
+  const cards: StatsLiveStatCard[] = [{
+    id: `live-score-${match.providerIds.espn ?? match.id}`,
+    title: "Score",
+    matchId: match.id,
+    eventId: summary.eventId,
+    homeTeamId: match.homeTeamId,
+    awayTeamId: match.awayTeamId,
+    homeTeamName: match.homeTeamName ?? "Home",
+    awayTeamName: match.awayTeamName ?? "Away",
+    homeValueLabel: String(match.homeScore ?? 0),
+    awayValueLabel: String(match.awayScore ?? 0),
+  }];
 
-  return topByStat
-    .sort((a, b) => highlightPriority(b) - highlightPriority(a))
-    .slice(0, 8)
-    .map((candidate, index) => highlightForCandidate(candidate, "tournament", index));
+  for (const statKey of LIVE_TEAM_STAT_ORDER) {
+    const homeStat = statValue(homeStats, statKey);
+    const awayStat = statValue(awayStats, statKey);
+    if (!homeStat && !awayStat) continue;
+    cards.push({
+      id: `live-${statKey}-${match.providerIds.espn ?? match.id}`,
+      title: LIVE_TEAM_STAT_LABELS[statKey],
+      matchId: match.id,
+      eventId: summary.eventId,
+      homeTeamId: match.homeTeamId,
+      awayTeamId: match.awayTeamId,
+      homeTeamName: match.homeTeamName ?? homeStats?.teamName ?? "Home",
+      awayTeamName: match.awayTeamName ?? awayStats?.teamName ?? "Away",
+      homeValueLabel: homeStat?.displayValue ?? "-",
+      awayValueLabel: awayStat?.displayValue ?? "-",
+    });
+  }
+
+  const homeYellow = statValue(homeStats, "yellowCards");
+  const awayYellow = statValue(awayStats, "yellowCards");
+  const homeRed = statValue(homeStats, "redCards");
+  const awayRed = statValue(awayStats, "redCards");
+  if (homeYellow || awayYellow || homeRed || awayRed) {
+    cards.push({
+      id: `live-cards-${match.providerIds.espn ?? match.id}`,
+      title: "Cards",
+      matchId: match.id,
+      eventId: summary.eventId,
+      homeTeamId: match.homeTeamId,
+      awayTeamId: match.awayTeamId,
+      homeTeamName: match.homeTeamName ?? homeStats?.teamName ?? "Home",
+      awayTeamName: match.awayTeamName ?? awayStats?.teamName ?? "Away",
+      homeValueLabel: cardValue(homeYellow, homeRed),
+      awayValueLabel: cardValue(awayYellow, awayRed),
+    });
+  }
+
+  return {
+    matchId: match.id,
+    eventId: summary.eventId,
+    matchLabel: matchLabel(match),
+    cards,
+  };
 }
 
-function buildLiveHighlights(match: Match, summary: EspnMatchStatsSummary): StatsHighlight[] {
-  const candidates = candidatesForMatch(match, summary)
-    .filter((candidate) => HIGHLIGHT_STATS.has(candidate.statKey))
-    .sort((a, b) => highlightPriority(b) - highlightPriority(a) || sortCandidates(a, b))
-    .slice(0, 3);
-
-  return candidates.map((candidate, index) => highlightForCandidate(candidate, "live", index));
-}
-
-function buildLeaderboards(candidates: RankedCandidate[]): Record<string, StatsLeaderboardRow[]> {
+function buildOrderedLeaderboards(candidates: RankedCandidate[], statOrder: readonly string[]): Record<string, StatsLeaderboardRow[]> {
   const rows: Record<string, StatsLeaderboardRow[]> = {};
-  for (const [statKey, statCandidates] of groupCandidates(candidates)) {
+  const grouped = groupCandidates(candidates);
+  for (const statKey of statOrder) {
+    const statCandidates = grouped.get(statKey);
+    if (!statCandidates) continue;
     rows[statKey] = statCandidates.sort(sortCandidates).slice(0, 5).map((candidate) => ({
       id: `${candidate.category}-${statKey}-${candidate.summary.eventId}-${candidate.subject}`,
       subject: candidate.subject,
@@ -192,7 +243,7 @@ function buildAggregatePlayerGoals(candidates: RankedCandidate[]): StatsLeaderbo
       subject: candidate.subject,
       teamId: candidate.teamId,
       teamAbbr: candidate.teamAbbr,
-      statLabel: "Goals",
+      statLabel: "Tournament Goals",
       value: (current?.value ?? 0) + candidate.value,
       valueLabel: String((current?.value ?? 0) + candidate.value),
       matchLabel: "Tournament total",
@@ -200,6 +251,23 @@ function buildAggregatePlayerGoals(candidates: RankedCandidate[]): StatsLeaderbo
   }
 
   return [...totals.values()].sort(sortLeaderboardRows).slice(0, 10);
+}
+
+function buildSingleMatchPlayerGoals(candidates: RankedCandidate[]): StatsLeaderboardRow[] {
+  return candidates
+    .filter((candidate) => candidate.category === "player" && candidate.statKey === "totalGoals")
+    .sort(sortCandidates)
+    .slice(0, 10)
+    .map((candidate) => ({
+      id: `player-single-match-goals-${candidate.summary.eventId}-${candidate.subject}`,
+      subject: candidate.subject,
+      teamId: candidate.teamId,
+      teamAbbr: candidate.teamAbbr,
+      statLabel: "Single Match Goals",
+      value: candidate.value,
+      valueLabel: candidate.valueLabel,
+      matchLabel: matchLabel(candidate.match),
+    }));
 }
 
 function buildAggregateTeamGoals(matches: Match[]): StatsLeaderboardRow[] {
@@ -221,19 +289,80 @@ function addTeamGoals(totals: Map<string, StatsLeaderboardRow>, id: string, subj
     subject,
     teamId,
     teamAbbr: null,
-    statLabel: "Goals",
+    statLabel: "Tournament Goals",
     value,
     valueLabel: String(value),
     matchLabel: "Tournament total",
   });
 }
 
+function buildSingleMatchTeamGoals(matches: Match[]): StatsLeaderboardRow[] {
+  return matches.flatMap((match) => [
+    teamGoalRow(match, "home", match.homeTeamId, match.homeTeamName, match.homeScore),
+    teamGoalRow(match, "away", match.awayTeamId, match.awayTeamName, match.awayScore),
+  ])
+    .flatMap((row) => row ? [row] : [])
+    .sort(sortLeaderboardRows)
+    .slice(0, 10);
+}
+
+function teamGoalRow(match: Match, side: "home" | "away", teamId: string | null, teamName: string | null, goals: number | null): StatsLeaderboardRow | null {
+  if (goals == null) return null;
+  return {
+    id: `team-single-match-goals-${match.id}-${side}`,
+    subject: teamName ?? teamId ?? "Team",
+    teamId,
+    teamAbbr: null,
+    statLabel: "Single Match Goals",
+    value: goals,
+    valueLabel: String(goals),
+    matchLabel: matchLabel(match),
+  };
+}
+
 function sortLeaderboardRows(a: StatsLeaderboardRow, b: StatsLeaderboardRow): number {
   return b.value - a.value || a.subject.localeCompare(b.subject);
 }
 
-function withGoalsLeaderboard(goals: StatsLeaderboardRow[], leaderboards: Record<string, StatsLeaderboardRow[]>): Record<string, StatsLeaderboardRow[]> {
-  return goals.length > 0 ? { totalGoals: goals, ...leaderboards } : leaderboards;
+function withGoalLeaderboards(tournamentGoals: StatsLeaderboardRow[], singleMatchGoals: StatsLeaderboardRow[], leaderboards: Record<string, StatsLeaderboardRow[]>): Record<string, StatsLeaderboardRow[]> {
+  return {
+    ...(tournamentGoals.length > 0 ? { tournamentGoals } : {}),
+    ...(singleMatchGoals.length > 0 ? { singleMatchGoals } : {}),
+    ...leaderboards,
+  };
+}
+
+function buildTournamentHighlights(playerHighlights: Record<string, StatsLeaderboardRow[]>, teamHighlights: Record<string, StatsLeaderboardRow[]>): Record<string, StatsLeaderboardRow[]> {
+  return {
+    ...(playerHighlights.tournamentGoals?.length ? { playerTournamentGoals: relabelRows(playerHighlights.tournamentGoals, "Player goals") } : {}),
+    ...(teamHighlights.tournamentGoals?.length ? { teamTournamentGoals: relabelRows(teamHighlights.tournamentGoals, "Team goals") } : {}),
+    ...(playerHighlights.singleMatchGoals?.length ? { playerSingleMatchGoals: relabelRows(playerHighlights.singleMatchGoals, "Single-match player goals") } : {}),
+    ...(teamHighlights.singleMatchGoals?.length ? { teamSingleMatchGoals: relabelRows(teamHighlights.singleMatchGoals, "Single-match team goals") } : {}),
+    ...(playerHighlights.shotsOnTarget?.length ? { playerShotsOnTarget: relabelRows(playerHighlights.shotsOnTarget, "Player shots on target") } : {}),
+    ...(teamHighlights.shotsOnTarget?.length ? { teamShotsOnTarget: relabelRows(teamHighlights.shotsOnTarget, "Team shots on target") } : {}),
+    ...(teamHighlights.cornerKicks?.length ? { corners: relabelRows(teamHighlights.cornerKicks, "Corners") } : {}),
+  };
+}
+
+function relabelRows(rows: StatsLeaderboardRow[], statLabel: string): StatsLeaderboardRow[] {
+  return rows.map((row) => ({ ...row, statLabel }));
+}
+
+function teamStatsForMatchSide(teamStats: EspnTeamStats[], teamName: string | null, fallbackIndex: number): EspnTeamStats | null {
+  if (!teamName) return teamStats[fallbackIndex] ?? null;
+  return teamStats.find((team) => team.teamName === teamName || teamName.includes(team.teamName ?? "")) ?? teamStats[fallbackIndex] ?? null;
+}
+
+function statValue(teamStats: EspnTeamStats | null, key: string): EspnStatValue | null {
+  return teamStats?.stats.find((stat) => stat.key === key) ?? null;
+}
+
+function cardValue(yellowCards: EspnStatValue | null, redCards: EspnStatValue | null): string {
+  const yellow = Number(yellowCards?.value ?? 0);
+  const red = Number(redCards?.value ?? 0);
+  const yellowLabel = yellow > 0 ? `${"🟨".repeat(yellow)} ${yellow}` : "0";
+  const redLabel = red > 0 ? `${"🟥".repeat(red)} ${red}` : "0";
+  return `${yellowLabel} / ${redLabel}`;
 }
 
 function groupCandidates(candidates: RankedCandidate[]): Map<string, RankedCandidate[]> {
@@ -246,40 +375,12 @@ function groupCandidates(candidates: RankedCandidate[]): Map<string, RankedCandi
   return grouped;
 }
 
-function highlightForCandidate(candidate: RankedCandidate, scope: StatsHighlight["scope"], index: number): StatsHighlight {
-  const label = scope === "live" ? "Live standout" : "Best so far";
-  const scoreLine = `${candidate.match.homeScore ?? 0}-${candidate.match.awayScore ?? 0}`;
-  const scoringEvidence = candidate.summary.scoringPlays[0];
-
-  return {
-    id: `${scope}-${candidate.statKey}-${candidate.summary.eventId}-${index}`,
-    scope,
-    category: candidate.category,
-    title: `${label}: ${candidate.statLabel}`,
-    subject: candidate.subject,
-    teamId: candidate.teamId,
-    teamAbbr: candidate.teamAbbr,
-    valueLabel: candidate.valueLabel,
-    detail: `${candidate.subject} has ${candidate.valueLabel} ${candidate.statLabel.toLowerCase()} in ${matchLabel(candidate.match)}.`,
-    evidence: scoringEvidence
-      ? `${scoreLine}; scoring note ${scoringEvidence.clock || "FT"} ${scoringEvidence.text}`
-      : `${scoreLine}; ESPN boxscore stat`,
-    matchId: candidate.match.id,
-    eventId: candidate.summary.eventId,
-  };
-}
-
 function knownStatsTeamId(abbr: string | null): string | null {
   return abbr ? teamIdFromAbbr(abbr) : null;
 }
 
 function sortCandidates(a: RankedCandidate, b: RankedCandidate): number {
   return b.value - a.value || matchLabel(a.match).localeCompare(matchLabel(b.match)) || a.subject.localeCompare(b.subject);
-}
-
-function highlightPriority(candidate: RankedCandidate): number {
-  const multiplier = candidate.statKey === "totalGoals" || candidate.statKey === "saves" ? 10 : 1;
-  return candidate.value * multiplier;
 }
 
 function displayValue(stat: EspnStatValue): string {
