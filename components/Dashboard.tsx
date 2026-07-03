@@ -119,32 +119,14 @@ function CompactMatchTeamLabel({ teamMap, teamId, fallbackName }: { teamMap: Map
   );
 }
 
-function formatUpdatedLabel(value: string | null): string {
-  if (!value) return "-";
-  const updatedAt = new Date(value);
-  const todayKey = easternDateKey(new Date());
-  const updatedKey = easternDateKey(updatedAt);
-
-  if (todayKey === updatedKey) {
-    return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(updatedAt);
-  }
-
-  const [todayYear, todayMonth, todayDay] = todayKey.split("-").map(Number);
-  const [updatedYear, updatedMonth, updatedDay] = updatedKey.split("-").map(Number);
-  const todayUtc = Date.UTC(todayYear, todayMonth - 1, todayDay);
-  const updatedUtc = Date.UTC(updatedYear, updatedMonth - 1, updatedDay);
-  const daysAgo = Math.max(1, Math.round((todayUtc - updatedUtc) / 86_400_000));
-  return `${daysAgo} day${daysAgo === 1 ? "" : "s"} ago`;
-}
-
 function formatMatchTime(value: string | null): string {
   if (!value) return "TBD";
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: "America/New_York", timeZoneName: "short" }).format(new Date(value));
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(value));
 }
 
 function formatScheduleKickoff(value: string | null): string {
   if (!value) return "TBD";
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York", timeZoneName: "short" }).format(new Date(value));
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(value));
 }
 
 function ScheduleKickoff({ value }: { value: string | null }) {
@@ -157,7 +139,7 @@ function ScheduleKickoff({ value }: { value: string | null }) {
     <>
       <Box component="span" sx={{ display: { xs: "block", sm: "none" }, fontSize: "0.75rem", lineHeight: 1.3 }}>
         <Box component="span" sx={{ display: "block", whiteSpace: "nowrap" }}>{date}</Box>
-        <Box component="span" sx={{ display: "block", whiteSpace: "nowrap" }}>{time} ET</Box>
+        <Box component="span" sx={{ display: "block", whiteSpace: "nowrap" }}>{time}</Box>
       </Box>
       <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>{formatScheduleKickoff(value)}</Box>
     </>
@@ -1166,7 +1148,7 @@ export function Dashboard({ initialData, initialTab }: { initialData: StaticAppD
             sx={{
               display: "grid",
               gap: { xs: 1.25, md: 2 },
-              gridTemplateColumns: { xs: "minmax(0, 1fr) auto", md: "190px minmax(0, 1fr) auto" },
+              gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "190px minmax(0, 1fr)" },
               minHeight: { xs: 0, md: 68 },
               py: { xs: 1.5, md: 1 },
             }}
@@ -1182,11 +1164,6 @@ export function Dashboard({ initialData, initialTab }: { initialData: StaticAppD
             <Box sx={{ gridColumn: { xs: "1 / -1", md: 2 }, gridRow: { xs: 2, md: 1 }, minWidth: 0, textAlign: { xs: "center", sm: "left" } }}>
               <TodayMatches state={state} teamMap={teamMap} onSelectMatch={setSelectedMatch} />
             </Box>
-            <Chip
-              label={`Updated ${formatUpdatedLabel(state.capturedAt)}`}
-              color={state.sources.matches.stale ? "warning" : "success"}
-              sx={{ display: { xs: "none", sm: "inline-flex" }, gridColumn: { md: 3 }, gridRow: { md: 1 }, justifySelf: "end", whiteSpace: "nowrap" }}
-            />
           </Toolbar>
         </Container>
         <Box sx={{ borderTop: { md: "1px solid #d8e0eb" } }}>

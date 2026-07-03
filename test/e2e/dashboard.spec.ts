@@ -84,12 +84,7 @@ test("renders dashboard and core tabs", async ({ page, isMobile }) => {
   await expect(headerTitle.locator("..")).toHaveCSS("text-align", isMobile ? "center" : "left");
   await expect(page.getByText("World Cup bracket challenge")).toBeVisible();
   await expect(page.getByText("Bracket dashboard", { exact: true })).toHaveCount(0);
-  const updatedBadge = page.getByText(/^Updated /);
-  if (isMobile) {
-    await expect(updatedBadge).toBeHidden();
-  } else {
-    await expect(updatedBadge).toBeVisible();
-  }
+  await expect(page.getByText(/^Updated /)).toHaveCount(0);
   const visibleHeaderMatchCards = page.locator('[data-testid="header-match-card"]:visible');
   await expect(page.getByLabel("Today's matches")).toHaveCSS("justify-content", isMobile ? "center" : "flex-start");
   await expect(visibleHeaderMatchCards).toHaveCount(isMobile ? 1 : 3);
