@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildAppData } from "@/lib/app-data/buildAppData";
+import { buildTournamentResults } from "@/lib/app-data/deriveTournamentResults";
 import { normalizePicks } from "@/lib/app-data/normalizePicks";
 import { buildLeaderboard } from "@/lib/app-data/scoring";
 import { buildGroupStandings } from "@/lib/app-data/standings";
@@ -96,6 +97,61 @@ describe("app data", () => {
     expect(leaderboard[0].knockoutPointsByRound).toEqual({ R32: 20, R16: 30, QF: 40, SF: 75, F: 100 });
     expect(leaderboard[0].totalPoints).toBe(495);
     expect(leaderboard[0].correctPicks).toEqual({ groups: 4, knockout: 5 });
+  });
+
+  it("scores knockout picks by round advancement instead of exact predicted slot", () => {
+    const normalized = normalizePicks(familyPicks);
+    const firstPick = normalized.picks[0];
+    const membersById = new Map(normalized.members.map((member) => [member.id, member.displayName]));
+    const actualBracket = {
+      R32: [],
+      R16: [{
+        slotId: "R16-actual-elsewhere",
+        round: "R16",
+        bracketId: 99,
+        matchId: "match_r16",
+        team1Id: null,
+        team2Id: null,
+        winnerId: firstPick.knockout.R16[0].winnerId,
+        status: "post",
+      }],
+      QF: [],
+      SF: [],
+      F: [],
+    } as AppState["actualBracket"];
+
+    const [entry] = buildLeaderboard([firstPick], membersById, {} as AppState["groups"], actualBracket, scoringRules);
+
+    expect(entry.knockoutPointsByRound.R16).toBe(30);
+    expect(entry.correctPicks.knockout).toBe(1);
+  });
+
+  it("builds actual knockout rounds from ESPN-style round labels", () => {
+    const staticData = buildAppData({ capturedAt: "2026-06-18T00:00:00.000Z" });
+    const firstPick = staticData.picks[0];
+    const results = buildTournamentResults(staticData, [{
+      id: "match_knockout_1",
+      providerIds: { espn: "401000001" },
+      stage: "knockout",
+      round: "Round of 32",
+      group: null,
+      kickoffAt: "2026-07-04T20:00:00.000Z",
+      status: "post",
+      statusText: "Final",
+      clock: null,
+      homeTeamId: firstPick.knockout.R32[0].team1Id,
+      awayTeamId: firstPick.knockout.R32[0].team2Id,
+      homeTeamName: null,
+      awayTeamName: null,
+      homeScore: 1,
+      awayScore: 0,
+      winnerTeamId: firstPick.knockout.R32[0].winnerId,
+      venue: { name: null, city: null, country: null },
+    }]);
+
+    expect(results.actualBracket.R32).toHaveLength(1);
+    expect(results.actualBracket.R32[0].winnerId).toBe(firstPick.knockout.R32[0].winnerId);
+    expect(results.leaderboard.find((entry) => entry.memberId === firstPick.memberId)?.knockoutPointsByRound.R32).toBe(20);
   });
 
   it("scores an unfinished group from its current standings", () => {

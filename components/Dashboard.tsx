@@ -615,8 +615,8 @@ function KnockoutView({ state, teamMap }: { state: AppState; teamMap: Map<string
   const [selectedRounds, setSelectedRounds] = useState<RoundId[]>([...ROUND_IDS]);
   const picksByMember = new Map(state.picks.map((pick) => [pick.memberId, pick]));
   const rankedMembers = membersInLeaderboardOrder(state);
-  const actualWinnersByRound = new Map(
-    ROUND_IDS.map((round) => [round, new Map(state.actualBracket[round].map((slot) => [slot.slotId, slot.winnerId]))]),
+  const actualAdvancersByRound = new Map(
+    ROUND_IDS.map((round) => [round, new Set(state.actualBracket[round].map((slot) => slot.winnerId).filter(Boolean))]),
   );
   const visibleMatchCount = selectedRounds.reduce(
     (total, round) => total + (state.picks[0]?.knockout[round].length ?? 0),
@@ -734,8 +734,7 @@ function KnockoutView({ state, teamMap }: { state: AppState; teamMap: Map<string
                   </TableCell>
                   {selectedRounds.flatMap((round) =>
                     (pick?.knockout[round] ?? []).map((match, index) => {
-                      const actualWinnerId = actualWinnersByRound.get(round)?.get(match.slotId);
-                      const isCorrectWinner = Boolean(actualWinnerId && actualWinnerId === match.winnerId);
+                      const isCorrectWinner = Boolean(actualAdvancersByRound.get(round)?.has(match.winnerId));
                       return (
                         <TableCell
                           key={`${round}-${match.slotId}`}
@@ -746,12 +745,13 @@ function KnockoutView({ state, teamMap }: { state: AppState; teamMap: Map<string
                             sx={{
                               border: "1px solid",
                               borderColor: isCorrectWinner ? "success.main" : "transparent",
+                              bgcolor: isCorrectWinner ? "success.main" : "transparent",
                               borderRadius: 1,
                               px: 0.5,
                               py: 0.25,
                             }}
                           >
-                            <TeamLabel teamMap={teamMap} teamId={match.winnerId} />
+                            <TeamLabel teamMap={teamMap} teamId={match.winnerId} color={isCorrectWinner ? "common.white" : undefined} />
                           </Box>
                         </TableCell>
                       );

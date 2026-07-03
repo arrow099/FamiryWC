@@ -54,10 +54,9 @@ function scoreKnockoutPicks(
   const pointsByRound = Object.fromEntries(ROUND_IDS.map((round) => [round, 0])) as Record<(typeof ROUND_IDS)[number], number>;
 
   for (const round of ROUND_IDS) {
-    const actualWinners = new Map((actualBracket[round] ?? []).map((slot) => [slot.slotId, slot.winnerId]));
+    const actualAdvancers = new Set((actualBracket[round] ?? []).map((slot) => slot.winnerId).filter(Boolean));
     for (const knockoutPick of pick.knockout[round]) {
-      const winnerId = actualWinners.get(knockoutPick.slotId);
-      if (winnerId && winnerId === knockoutPick.winnerId) {
+      if (actualAdvancers.has(knockoutPick.winnerId)) {
         const roundPoints = rules.rules.knockoutAdvancementByRound[round];
         points += roundPoints;
         pointsByRound[round] += roundPoints;
